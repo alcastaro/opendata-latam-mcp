@@ -13,9 +13,21 @@ to a single portal via constructor; reuse the httpx client per instance.
 from __future__ import annotations
 
 import re
+import ssl
 from typing import Any, ClassVar
 
 import httpx
+
+# Some LatAm gov portals (e.g. datos.gob.mx) ship an incomplete TLS cert chain.
+# curl works because it reads the macOS / Windows / Linux system trust store.
+# Python's httpx defaults to certifi which is narrower. Build a context backed
+# by the OS trust store via `truststore`; fall back to default if unavailable.
+try:
+    import truststore as _truststore  # type: ignore[import-not-found]
+
+    _SSL_CTX: ssl.SSLContext | None = _truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+except Exception:
+    _SSL_CTX = None
 
 USER_AGENT = "opendata-latam-mcp/0.1 (MCP Server; +https://github.com/alcastaro/opendata-latam-mcp)"
 DEFAULT_TIMEOUT = 15.0
@@ -49,12 +61,15 @@ class CkanAdapter:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
+            kwargs: dict[str, Any] = dict(
                 base_url=self.BASE_URL,
                 headers={"User-Agent": USER_AGENT},
                 timeout=DEFAULT_TIMEOUT,
                 follow_redirects=True,
             )
+            if _SSL_CTX is not None:
+                kwargs["verify"] = _SSL_CTX
+            self._client = httpx.AsyncClient(**kwargs)
         return self._client
 
     async def close(self) -> None:
