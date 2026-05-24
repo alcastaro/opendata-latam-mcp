@@ -17,10 +17,12 @@ class Country:
 
 
 # Currently supported. Add more here as adapters are implemented.
+# Colombia (CO) uses Socrata — planned for v0.2.
+# Brazil (BR) uses custom auth — planned for v0.3.
+# Peru (PE) is CloudWAF-protected — planned for v0.4.
 COUNTRIES: dict[str, Country] = {
     "AR": Country("AR", "Argentina", "Argentina"),
     "CL": Country("CL", "Chile", "Chile"),
-    "CO": Country("CO", "Colombia", "Colombia"),
     "DO": Country("DO", "República Dominicana", "Dominican Republic"),
     "EC": Country("EC", "Ecuador", "Ecuador"),
     "MX": Country("MX", "México", "Mexico"),
