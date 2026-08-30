@@ -5,6 +5,7 @@ Singleton per country: one httpx client per portal, reused across tool calls.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ..countries import normalize_country_code
@@ -18,6 +19,8 @@ from .ckan import (
     PanamaCkanAdapter,
     UruguayCkanAdapter,
 )
+
+logger = logging.getLogger("opendata-latam-mcp")
 
 # Country code → adapter class
 _ADAPTER_CLASSES: dict[str, type] = {
@@ -66,10 +69,16 @@ def list_supported() -> list[dict[str, Any]]:
 
 
 async def close_all() -> None:
-    """Close every cached adapter (httpx clients). Call on shutdown."""
-    for adapter in list(_INSTANCES.values()):
+    """Close every cached adapter (httpx clients). Call on shutdown.
+
+    One adapter failing to close must not prevent the others from closing, so
+    each is attempted independently — but the failure is logged rather than
+    discarded. A silently swallowed close is how a leaked connection stays
+    invisible.
+    """
+    for code, adapter in list(_INSTANCES.items()):
         try:
             await adapter.close()
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — shutdown continues regardless
+            logger.warning("closing the %s adapter failed: %s", code, e)
     _INSTANCES.clear()

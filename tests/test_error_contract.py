@@ -149,6 +149,22 @@ def test_each_failure_class_gets_its_own_action(message, expected):
     assert expected in out["hint"], f"{message!r} got: {out['hint']}"
 
 
+def test_an_ambiguous_message_goes_to_the_most_specific_branch():
+    """Pins the branch ORDER, which is where a string taxonomy rots.
+
+    Portals forward things like "database connection failed" inside a CKAN
+    error. A bare "connect" test would claim that for the network hint and send
+    the model to retry a call the portal rejected on its contents. If anyone
+    reorders `_hint_for`, this fails instead of silently degrading.
+    """
+    out = build_error(
+        RuntimeError("[DO] CKAN error in package_show: database connection failed"),
+        tool="t",
+    )
+    assert "rejected its contents" in out["hint"]
+    assert "unreachable" not in out["hint"]
+
+
 def test_the_original_message_is_never_swallowed():
     out = build_error(ValueError("the specific thing that went wrong"), tool="t")
     assert "the specific thing that went wrong" in out["error"]

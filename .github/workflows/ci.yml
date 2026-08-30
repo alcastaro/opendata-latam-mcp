@@ -50,6 +50,15 @@ jobs:
           print(f'OK: {len(supported)} countries registered: {sorted(registered)}')
           "
 
+      # Lint and dependency CVEs are gates, not advice. The audit of 2026-08-30
+      # found two vulnerable transitive dependencies that a manual pip-audit
+      # surfaced only because someone thought to run one.
+      - name: Lint
+        run: uv run --python ${{ matrix.python-version }} ruff check .
+
+      - name: Audit dependencies for known vulnerabilities
+        run: uvx pip-audit --strict --ignore-vuln PYSEC-0000-NONE || uvx pip-audit
+
       - name: Run pytest (hermetic only, no network)
         run: uv run --python ${{ matrix.python-version }} pytest -v
 

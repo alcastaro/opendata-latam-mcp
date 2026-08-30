@@ -38,8 +38,8 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import __version__, adapters
-from .errors import tool_envelope
 from .countries import COUNTRIES, all_codes
+from .errors import build_error, tool_envelope
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -373,12 +373,15 @@ async def cross_country_search(
             adapter = adapters.get_adapter(code)
             r = await adapter.search_datasets(query=query, limit=limit_per_country)
             return code, r
-        except Exception as e:
-            return code, {"error": str(e), "country": code}
+        except Exception as e:  # noqa: BLE001 — one dead portal must not sink the fan-out
+            # Same taxonomy as the per-country tools. Without this the fan-out
+            # would report a bare str(e) with no hint, so the identical failure
+            # would be actionable through search_datasets and opaque here.
+            return code, build_error(e, tool="cross_country_search", country=code)
 
     results = await asyncio.gather(*[_one(c) for c in target_codes])
 
-    by_country: dict[str, dict] = {code: data for code, data in results}
+    by_country: dict[str, dict] = dict(results)
     summary = {
         code: {
             "country_name": COUNTRIES[code].name_es if code in COUNTRIES else code,
@@ -412,20 +415,26 @@ async def cross_country_stats() -> dict:
             adapter = adapters.get_adapter(code)
             r = await adapter.get_site_stats()
             return code, r
-        except Exception as e:
-            return code, {"error": str(e), "country": code}
+        except Exception as e:  # noqa: BLE001 — one dead portal must not sink the fan-out
+            return code, build_error(e, tool="cross_country_stats", country=code)
 
     results = await asyncio.gather(*[_one(c) for c in all_codes()])
-    return {code: data for code, data in results}
+    return dict(results)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 
 def _tool_count() -> int | None:
+    """Best-effort, for the startup log only.
+
+    Reaches into a private attribute, so it must never be the reason a server
+    fails to start: if a future SDK renames it, the log line goes quiet and
+    everything else keeps working.
+    """
     try:
         return len(mcp._tool_manager._tools)  # type: ignore[attr-defined]
-    except Exception:
+    except Exception:  # noqa: BLE001 — a log line is not worth failing startup
         return None
 
 

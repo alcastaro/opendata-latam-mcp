@@ -63,6 +63,9 @@ Repository = "https://github.com/alcastaro/opendata-latam-mcp"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opendata_latam_mcp"]
+# PEP 561 marker. Without it the annotations do not travel, and this package is
+# meant to be imported by others.
+artifacts = ["src/opendata_latam_mcp/py.typed"]
 
 # The sdist is an INCLUDE list, never an exclude list. `uv build` with hatchling
 # does NOT respect nested .gitignore files: measured 2026-08-30, it packaged
@@ -83,6 +86,23 @@ only-include = [
     "LICENSE",
     "server.json",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "S", "BLE", "RUF"]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "S101",    # assert is how tests assert
+    "UP038",   # isinstance tuples are clearer than the union form here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private attributes on purpose: the whole point of several of
+# them is asserting how the server is wired, not just how it behaves.
+"tests/*" = ["S105", "S106", "SLF001"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

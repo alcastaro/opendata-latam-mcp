@@ -100,7 +100,7 @@ async def sweep_country(code: str, per_country: int, rng: random.Random) -> Coun
     try:
         head = await adapter.search_datasets(query=None, limit=1)
         res.catalogue_total = int(head.get("total") or 0)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — a failed country is reported, not raised
         res.errors.append(f"catalogue unreachable: {type(e).__name__}: {e}")
         return res
 
@@ -124,7 +124,7 @@ async def sweep_country(code: str, per_country: int, rng: random.Random) -> Coun
         async with sem:
             try:
                 page = await adapter.search_datasets(query=None, limit=1, offset=off)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — one bad offset must not end the sweep
                 res.errors.append(f"offset {off}: {type(e).__name__}")
                 return
             datasets = page.get("datasets") or []
@@ -136,7 +136,7 @@ async def sweep_country(code: str, per_country: int, rng: random.Random) -> Coun
                 return
             try:
                 full = await adapter.get_dataset(ident)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — one bad dataset must not end the sweep
                 res.errors.append(f"get_dataset {ident}: {type(e).__name__}")
                 return
             resources = (full.get("resources") or [])[:MAX_RESOURCES_PER_DATASET]
@@ -169,7 +169,10 @@ async def run(codes: list[str], per_country: int, seed: int) -> int:
     )
     results = []
     for code in codes:
-        rng = random.Random(f"{seed}:{code}")
+        # Deliberately a plain PRNG: this samples a catalogue for a coverage
+        # figure, not a security decision, and it must be REPRODUCIBLE from the
+        # seed so a published number can be re-derived by anyone.
+        rng = random.Random(f"{seed}:{code}")  # noqa: S311
         r = await sweep_country(code, per_country, rng)
         results.append(r)
         print(r.line(), flush=True)

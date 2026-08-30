@@ -91,15 +91,20 @@ def _hint_for(message: str) -> str:
             "The portal did not answer in time. Retry once; if it persists, "
             "lower `limit`, since large pages are what these portals are slowest at."
         )
-    if "network error" in low or "connect" in low:
-        return (
-            "The portal was unreachable — a DNS or connectivity failure on its "
-            "side or on this machine's. Retry once, then try another country."
-        )
+    # CKAN's own errors are checked BEFORE the network branch. Portals forward
+    # messages like "database connection failed" inside a CKAN error, and a bare
+    # "connect" substring would claim those for the network hint — sending the
+    # model to retry a call the portal rejected on its contents. Specific marker
+    # first; a test pins this ordering so a future reshuffle fails loudly.
     if "ckan error" in low:
         return (
             "The portal accepted the request and rejected its contents. Check the "
             "argument values; the portal's own message is in `error`."
+        )
+    if "network error" in low or "connect" in low:
+        return (
+            "The portal was unreachable — a DNS or connectivity failure on its "
+            "side or on this machine's. Retry once, then try another country."
         )
     if "http 5" in low:
         return "The portal has a server-side fault. Retry once, then try another country."

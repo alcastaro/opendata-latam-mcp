@@ -12,6 +12,8 @@ to a single portal via constructor; reuse the httpx client per instance.
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import ssl
 from typing import Any, ClassVar
@@ -19,6 +21,7 @@ from typing import Any, ClassVar
 import httpx
 
 from ... import __version__
+from ...netguard import guard_request_hook
 
 # Some LatAm gov portals (e.g. datos.gob.mx) ship an incomplete TLS cert chain.
 # curl works because it reads the macOS / Windows / Linux system trust store.
@@ -28,7 +31,10 @@ try:
     import truststore as _truststore  # type: ignore[import-not-found]
 
     _SSL_CTX: ssl.SSLContext | None = _truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-except Exception:
+except Exception:  # noqa: BLE001 — any failure here must degrade, not crash
+    # truststore is optional at runtime: without it httpx falls back to certifi,
+    # which works everywhere except Mexico. Losing one portal is better than
+    # failing to start.
     _SSL_CTX = None
 
 # No URL in the User-Agent. Measured 2026-08-29: datos.gob.mx answers 403 to any
@@ -37,7 +43,19 @@ except Exception:
 # honestly and by name — this is not browser impersonation, which this project
 # does not do. Keep the project URL out of this string or Mexico breaks again.
 USER_AGENT = f"opendata-latam-mcp/{__version__} (MCP Server)"
-DEFAULT_TIMEOUT = 15.0
+
+# 15s is comfortable for catalogue calls and measured to be too short for real
+# analysis: the sibling Colombian server saw a median over 5.98M rows take 81.5s
+# and fail three retries at 20s. Configurable now rather than when the
+# aggregation layer turns it into an incident. Bounded so a typo cannot hang a
+# stdio server forever.
+DEFAULT_TIMEOUT = min(max(float(os.getenv("OPENDATA_LATAM_TIMEOUT", "15") or 15), 1.0), 300.0)
+
+# A portal that answers with a huge body — a broken export, an HTML error page,
+# a catalogue dump — must not be able to exhaust this process's memory. Read is
+# capped and the excess refused rather than truncated: a truncated JSON body
+# fails to parse with a message blaming the publisher for a cut we made.
+MAX_RESPONSE_BYTES = int(os.getenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "25")) * 1024 * 1024
 
 # Output trimming so a single call never blows the LLM's context window.
 NOTES_TRUNC = 300
@@ -80,17 +98,30 @@ class CkanAdapter:
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
+        # Two concurrent calls for the same country would otherwise each build a
+        # client and one would be dropped unclosed. cross_country_search fans out
+        # precisely that way.
+        self._client_lock = asyncio.Lock()
 
     # ─── HTTP layer ──────────────────────────────────────────────────────
 
     async def _get_client(self) -> httpx.AsyncClient:
+        async with self._client_lock:
+            return await self._build_client_if_needed()
+
+    async def _build_client_if_needed(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            kwargs: dict[str, Any] = dict(
-                base_url=self.BASE_URL,
-                headers={"User-Agent": USER_AGENT},
-                timeout=DEFAULT_TIMEOUT,
-                follow_redirects=True,
-            )
+            kwargs: dict[str, Any] = {
+                "base_url": self.BASE_URL,
+                "headers": {"User-Agent": USER_AGENT},
+                "timeout": DEFAULT_TIMEOUT,
+                "follow_redirects": True,
+                # Installed as a request hook, not a one-shot check before the
+                # first call: that is the difference between validating the
+                # address we chose and validating every hop. A portal answering
+                # 302 Location: http://169.254.169.254/ is refused at the jump.
+                "event_hooks": {"request": [guard_request_hook]},
+            }
             if _SSL_CTX is not None:
                 kwargs["verify"] = _SSL_CTX
             self._client = httpx.AsyncClient(**kwargs)
@@ -105,10 +136,33 @@ class CkanAdapter:
     def _clean(params: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in params.items() if v is not None}
 
+    async def _get_capped(
+        self, client: httpx.AsyncClient, path: str, params: dict[str, Any]
+    ) -> httpx.Response:
+        """GET with a hard ceiling on how much we will read into memory.
+
+        Streamed so the limit is enforced while reading rather than after: a
+        declared Content-Length can lie, and by the time a non-streamed read
+        finishes the memory is already gone.
+        """
+        async with client.stream("GET", path, params=params) as r:
+            body = bytearray()
+            async for chunk in r.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > MAX_RESPONSE_BYTES:
+                    await r.aclose()
+                    raise RuntimeError(
+                        f"[{self.COUNTRY_CODE}] {self.PORTAL_NAME} response exceeded "
+                        f"{MAX_RESPONSE_BYTES // (1024 * 1024)} MB and was refused. "
+                        f"Request fewer rows, or raise OPENDATA_LATAM_MAX_RESPONSE_MB."
+                    )
+            r._content = bytes(body)
+        return r
+
     async def _ckan(self, action: str, params: dict[str, Any] | None = None) -> Any:
         client = await self._get_client()
         try:
-            r = await client.get(f"/{action}", params=self._clean(params or {}))
+            r = await self._get_capped(client, f"/{action}", self._clean(params or {}))
         except httpx.TimeoutException as e:
             raise RuntimeError(
                 f"[{self.COUNTRY_CODE}] timeout in {action} (>{DEFAULT_TIMEOUT}s)"
@@ -372,15 +426,10 @@ class CkanAdapter:
             for f in (result.get("fields") or [])
             if f.get("id") != "_id"
         ]
-        trimmed = []
-        for rec in records:
-            trimmed.append(
-                {
-                    k: (self._truncate(v, CELL_TRUNC) if isinstance(v, str) else v)
-                    for k, v in rec.items()
-                    if k != "_id"
-                }
-            )
+        trimmed = [
+            {k: self._trim_cell(v) for k, v in rec.items() if k != "_id"}
+            for rec in records
+        ]
         return {
             "country": self.COUNTRY_CODE,
             "portal": self.PORTAL_NAME,
@@ -391,6 +440,27 @@ class CkanAdapter:
             "fields": fields,
             "rows": trimmed,
         }
+
+    @classmethod
+    def _trim_cell(cls, value: Any) -> Any:
+        """Bound any cell, not just strings.
+
+        The previous version only truncated `str`, so a CKAN JSONB column
+        holding a nested object or list came back whole and could flood the
+        model's context despite the per-cell cap. Non-scalars are serialized
+        before being measured, because their size is what matters.
+        """
+        if isinstance(value, str):
+            return cls._truncate(value, CELL_TRUNC)
+        if isinstance(value, (dict, list, tuple)):
+            import json
+
+            try:
+                text = json.dumps(value, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                text = str(value)
+            return cls._truncate(text, CELL_TRUNC)
+        return value
 
     async def search_resources(self, query: str, limit: int = 10) -> dict[str, Any]:
         result = await self._ckan(

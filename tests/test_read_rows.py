@@ -164,3 +164,86 @@ def test_sweep_counts_datasets_not_resources():
     r = CountryResult(country="PA", datasets_sampled=40, datasets_with_rows=11)
     assert r.coverage == pytest.approx(27.5)
     assert "with_rows=11" in r.line()
+
+
+# ─── Robustness bounds (audit R3) ─────────────────────────────────────────────
+
+
+async def test_a_nested_cell_is_truncated_too(httpx_mock):
+    """The per-cell cap used to apply only to strings.
+
+    CKAN JSONB columns hold objects and arrays. Those came back whole, so a
+    resource with large nested cells flooded the model's context despite the
+    cap being "in place". Non-scalars are serialized before being measured,
+    because the serialized size is what actually costs context.
+    """
+    rid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    httpx_mock.add_response(
+        url=f"{DS}?resource_id={rid}&limit=20&offset=0",
+        json={
+            "success": True,
+            "result": {
+                "total": 1,
+                "fields": [{"id": "payload", "type": "json"}],
+                "records": [{"payload": {"items": ["x" * 400 for _ in range(20)]}}],
+            },
+        },
+    )
+    out = await PanamaCkanAdapter().read_resource_rows(rid)
+    assert len(str(out["rows"][0]["payload"])) <= 201
+
+
+async def test_an_oversized_response_is_refused_not_truncated(httpx_mock, monkeypatch):
+    """A body over the cap must fail loudly rather than be cut.
+
+    Truncating changes what a parse failure means: a JSON body cut at the byte
+    limit fails with "invalid JSON" at exactly that offset, and the message
+    blames the publisher for a cut we made. The sibling project lost hours to
+    that. Refusing names the real cause and says what to do.
+    """
+    from opendata_latam_mcp.adapters.ckan import base as ckan_base
+
+    monkeypatch.setattr(ckan_base, "MAX_RESPONSE_BYTES", 1024)
+    httpx_mock.add_response(
+        json={"success": True, "result": {"count": 0, "results": [{"pad": "x" * 5000}]}}
+    )
+    out = await PanamaCkanAdapter().read_resource_rows(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
+    assert "exceeded" in out["error"]
+    assert "fewer rows" in out["error"] or "fewer rows" in out["hint"]
+
+
+async def test_concurrent_calls_share_one_client():
+    """cross_country_search fans out; without a lock each call could build its
+    own client and leak all but one.
+
+    No HTTP mock here on purpose: this asserts client construction, and
+    registering an unused response would fail the suite for the wrong reason.
+    """
+    import asyncio as _asyncio
+
+    adapter = PanamaCkanAdapter()
+    clients = await _asyncio.gather(*[adapter._get_client() for _ in range(8)])
+    assert len({id(c) for c in clients}) == 1
+    await adapter.close()
+
+
+def test_the_timeout_is_configurable_and_bounded(monkeypatch):
+    """Fixed at 15s it was measured too short for real aggregation, and an
+    unbounded value could hang a stdio server forever."""
+    import importlib
+
+    from opendata_latam_mcp.adapters.ckan import base as ckan_base
+
+    monkeypatch.setenv("OPENDATA_LATAM_TIMEOUT", "90")
+    importlib.reload(ckan_base)
+    assert ckan_base.DEFAULT_TIMEOUT == 90.0
+
+    monkeypatch.setenv("OPENDATA_LATAM_TIMEOUT", "99999")
+    importlib.reload(ckan_base)
+    assert ckan_base.DEFAULT_TIMEOUT == 300.0
+
+    monkeypatch.delenv("OPENDATA_LATAM_TIMEOUT")
+    importlib.reload(ckan_base)
+    assert ckan_base.DEFAULT_TIMEOUT == 15.0

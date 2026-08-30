@@ -16,7 +16,6 @@ from opendata_latam_mcp.adapters.ckan import (
     UruguayCkanAdapter,
 )
 
-
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
 
