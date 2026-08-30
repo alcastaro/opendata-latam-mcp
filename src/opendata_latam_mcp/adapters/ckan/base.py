@@ -29,7 +29,12 @@ try:
 except Exception:
     _SSL_CTX = None
 
-USER_AGENT = "opendata-latam-mcp/0.1 (MCP Server; +https://github.com/alcastaro/opendata-latam-mcp)"
+# No URL in the User-Agent. Measured 2026-08-29: datos.gob.mx answers 403 to any
+# UA containing a URL and to the default "curl/..." and "python-httpx/...", but
+# 200 to "opendata-latam-mcp/0.1 (MCP Server)". We still identify ourselves
+# honestly and by name — this is not browser impersonation, which this project
+# does not do. Keep the project URL out of this string or Mexico breaks again.
+USER_AGENT = "opendata-latam-mcp/0.1 (MCP Server)"
 DEFAULT_TIMEOUT = 15.0
 
 # Output trimming so a single call never blows the LLM's context window.
