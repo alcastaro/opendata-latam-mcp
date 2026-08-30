@@ -64,6 +64,26 @@ Repository = "https://github.com/alcastaro/opendata-latam-mcp"
 [tool.hatch.build.targets.wheel]
 packages = ["src/opendata_latam_mcp"]
 
+# The sdist is an INCLUDE list, never an exclude list. `uv build` with hatchling
+# does NOT respect nested .gitignore files: measured 2026-08-30, it packaged
+# .code-review-graph/graph.db — 864 KB, 84% of the artifact, carrying 4,226
+# absolute paths from the developer's home directory — a file git had never
+# tracked, protected only by a nested .gitignore that the packer never reads.
+# The sibling Dominican project shipped the same class of file for the same
+# reason. An exclude list only ever blocks the leak you already know about;
+# the next local tool will use a different directory name. CI asserts this
+# contents list on every run, because the rule was written down once already
+# and still fired.
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "tests",
+    "README.md",
+    "README.es.md",
+    "LICENSE",
+    "server.json",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

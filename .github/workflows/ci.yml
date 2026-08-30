@@ -28,18 +28,26 @@ jobs:
       - name: Install dependencies (with dev extras)
         run: uv sync --python ${{ matrix.python-version }} --extra dev
 
-      - name: Verify all modules import
+      # The country count is derived from COUNTRIES rather than hardcoded. A
+      # literal here went stale the moment Panama was added and would have
+      # failed CI on the first push -- a red that means nothing teaches people
+      # to ignore the red.
+      - name: Verify all modules import and the registry agrees with COUNTRIES
         run: |
           uv run --python ${{ matrix.python-version }} python -c "
-          from opendata_latam_mcp import adapters, countries, server
-          from opendata_latam_mcp.adapters.ckan import (
-              ArgentinaCkanAdapter, ChileCkanAdapter,
-              DominicanRepublicCkanAdapter, EcuadorCkanAdapter,
-              MexicoCkanAdapter, UruguayCkanAdapter,
-          )
+          from opendata_latam_mcp import adapters, server
+          from opendata_latam_mcp.countries import COUNTRIES
+          from opendata_latam_mcp.adapters import ckan
           supported = adapters.list_supported()
-          assert len(supported) == 6, f'Expected 6 countries, got {len(supported)}'
-          print(f'OK: {len(supported)} countries registered')
+          registered = {s['country'] for s in supported}
+          assert registered == set(COUNTRIES), (
+              f'registry {sorted(registered)} != COUNTRIES {sorted(COUNTRIES)}'
+          )
+          for code in COUNTRIES:
+              adapters.get_adapter(code)
+          exported = {n for n in ckan.__all__ if n.endswith('CkanAdapter')}
+          assert len(exported) >= len(COUNTRIES), 'an adapter is not exported'
+          print(f'OK: {len(supported)} countries registered: {sorted(registered)}')
           "
 
       - name: Run pytest (hermetic only, no network)
@@ -66,6 +74,54 @@ jobs:
 
       - name: Build wheel + sdist
         run: uv build
+
+      # `uv build` with hatchling does NOT respect nested .gitignore files. On
+      # 2026-08-30 it packaged a local tool's 864 KB SQLite database into the
+      # sdist -- 84% of the artifact, carrying 4,226 absolute paths from a home
+      # directory -- a file git had never tracked. The sibling Dominican project
+      # shipped the same class of file for the same reason. PyPI artifacts
+      # cannot be replaced, only yanked, and mirrors copy them first, so this
+      # has to be caught before publish and not after. The sdist is an include
+      # list in pyproject.toml; this asserts the list actually held.
+      - name: Assert the sdist ships only what it should
+        run: |
+          uv run --python ${{ matrix.python-version }} python - <<'PY'
+          import tarfile, glob, sys, posixpath
+          ALLOWED_TOP = {
+              "src", "tests", "README.md", "README.es.md", "LICENSE",
+              "server.json", "pyproject.toml", "PKG-INFO", ".gitignore",
+          }
+          path = glob.glob("dist/*.tar.gz")[0]
+          with tarfile.open(path) as tf:
+              names = tf.getnames()
+              root = names[0].split("/")[0]
+              tops = {posixpath.relpath(n, root).split("/")[0] for n in names}
+              tops.discard(".")
+              unexpected = sorted(tops - ALLOWED_TOP)
+              assert not unexpected, f"sdist ships unexpected entries: {unexpected}"
+              # No file may carry a REAL home-directory path. Documentation
+              # placeholders are allowed and are the reason this matches on the
+              # username segment rather than on the "/Users/" prefix: the READMEs
+              # legitimately show /Users/YOUR_USERNAME/.local/bin/uvx as the
+              # macOS config example.
+              import re
+              HOME_PATH = re.compile(rb"/(?:Users|home)/([A-Za-z0-9._-]+)")
+              PLACEHOLDERS = {
+                  b"YOUR_USERNAME", b"TU_USUARIO", b"USERNAME", b"USER",
+                  b"tu_usuario", b"your_username", b"usuario", b"user",
+              }
+              for member in tf.getmembers():
+                  if not member.isfile():
+                      continue
+                  blob = tf.extractfile(member).read()
+                  real = {m for m in HOME_PATH.findall(blob) if m not in PLACEHOLDERS}
+                  if real:
+                      sys.exit(
+                          f"{member.name} carries a real home path: "
+                          f"{sorted(x.decode() for x in real)[:3]}"
+                      )
+          print(f"OK: sdist clean, {len(names)} entries, top level {sorted(tops)}")
+          PY
 
       - name: Validate server.json against MCP Registry
         run: |
