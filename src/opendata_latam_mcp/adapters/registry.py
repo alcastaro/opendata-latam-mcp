@@ -15,6 +15,7 @@ from .ckan import (
     DominicanRepublicCkanAdapter,
     EcuadorCkanAdapter,
     MexicoCkanAdapter,
+    PanamaCkanAdapter,
     UruguayCkanAdapter,
 )
 
@@ -25,6 +26,7 @@ _ADAPTER_CLASSES: dict[str, type] = {
     "DO": DominicanRepublicCkanAdapter,
     "EC": EcuadorCkanAdapter,
     "MX": MexicoCkanAdapter,
+    "PA": PanamaCkanAdapter,
     "UY": UruguayCkanAdapter,
 }
 

@@ -16,16 +16,31 @@ class Country:
     name_en: str
 
 
-# Currently supported. Add more here as adapters are implemented.
-# Colombia (CO) uses Socrata — planned for v0.2.
-# Brazil (BR) uses custom auth — planned for v0.3.
-# Peru (PE) is CloudWAF-protected — planned for v0.4.
+# Currently supported. Add more here as adapters are implemented, and ONLY once
+# the adapter exists in adapters/registry._ADAPTER_CLASSES.
+#
+# Measured 2026-08-30 against the live portals (do not edit these notes from
+# memory — probe the portal, that is the whole lesson):
+#   PA Panamá  — CKAN 2.11.2 WITH DataStore. All seven actions this adapter
+#                calls answer; 5,667 datasets. Drop-in: needs only a descriptor.
+#   PE Perú    — NOT "CloudWAF-protected", that earlier note was wrong. It is
+#                DKAN (Drupal 7) serving a PARTIAL CKAN action API: package_list
+#                (4,670), package_show and group_list work; package_search,
+#                organization_list, tag_list and resource_search all 404. No
+#                server-side search at all.
+#   PY Paraguay— DKAN too, and thinner: only package_list (434) and group_list.
+#   CO Colombia— two platforms (Socrata national + CKAN municipal); comes from
+#                the colombian-open-data-mcp package, not from here.
+#   BR Brasil  — HTTP 401, Bearer token via developer registration.
+#   BO, GT     — HTTP 403 to everything, same shape as Ecuador.
+#   CR         — ArcGIS Hub, not CKAN.
 COUNTRIES: dict[str, Country] = {
     "AR": Country("AR", "Argentina", "Argentina"),
     "CL": Country("CL", "Chile", "Chile"),
     "DO": Country("DO", "República Dominicana", "Dominican Republic"),
     "EC": Country("EC", "Ecuador", "Ecuador"),
     "MX": Country("MX", "México", "Mexico"),
+    "PA": Country("PA", "Panamá", "Panama"),
     "UY": Country("UY", "Uruguay", "Uruguay"),
 }
 

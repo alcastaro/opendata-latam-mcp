@@ -3,6 +3,22 @@
 Every tool takes a `country` parameter (ISO 3166-1 alpha-2) so the model always
 knows which portal it is hitting. `cross_country_search` fans out to every
 selected portal in parallel — the one thing a single-country MCP cannot do.
+
+**What this server does, and does not, do.** All fourteen tools are
+CATALOGUE-level: they search datasets, return metadata, and list organizations,
+groups and tags. **None of them reads a row of data.** There is no DataStore
+query, no file download, no CSV/XLSX parsing here. Reading rows is what the
+dedicated country packages do (`dominican-open-data-mcp`,
+`colombian-open-data-mcp`), and it will arrive here through them rather than
+being reimplemented. Saying so in the tool descriptions is deliberate: a server
+that claims a depth it does not have costs the model a turn to discover.
+
+Portals, measured 2026-08-30 by exercising the registered tools:
+AR 1,273 · CL 3,188 · DO 1,062 · MX 1,736 · PA 5,667 · UY 2,702 — 15,628 live.
+EC is configured but has answered HTTP 403 to every request, from the site root
+as well as the API, since 2026-08-30. Kept in the list rather than removed,
+because a single vantage point is not enough to tell a portal that closed
+programmatic access from one that blocks this address.
 """
 
 from __future__ import annotations
@@ -66,7 +82,11 @@ CountryArg = Annotated[
         description=(
             "ISO 3166-1 alpha-2 country code. Supported: "
             "AR (Argentina), CL (Chile), DO (Dominican Republic), "
-            "EC (Ecuador), MX (Mexico), UY (Uruguay). "
+            "MX (Mexico), PA (Panama), UY (Uruguay). "
+            "EC (Ecuador) is configured but its portal has answered HTTP 403 to "
+            "every request since 2026-08-30 — expect an error, not results. "
+            "Every tool here reads CATALOGUE metadata: it finds datasets and "
+            "describes them, it does not read their rows. "
             "Use list_supported_countries to verify before passing other codes."
         )
     ),

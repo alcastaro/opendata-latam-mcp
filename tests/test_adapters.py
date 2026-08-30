@@ -12,6 +12,7 @@ from opendata_latam_mcp.adapters.ckan import (
     DominicanRepublicCkanAdapter,
     EcuadorCkanAdapter,
     MexicoCkanAdapter,
+    PanamaCkanAdapter,
     UruguayCkanAdapter,
 )
 
@@ -22,7 +23,7 @@ from opendata_latam_mcp.adapters.ckan import (
 def test_list_supported_returns_all_countries():
     supported = adapters.list_supported()
     codes = {s["country"] for s in supported}
-    assert codes == {"AR", "CL", "DO", "EC", "MX", "UY"}
+    assert codes == {"AR", "CL", "DO", "EC", "MX", "PA", "UY"}
 
 
 def test_get_adapter_by_code():
@@ -62,6 +63,7 @@ def test_adapters_are_singletons():
         (DominicanRepublicCkanAdapter, "DO", "datos.gob.do"),
         (EcuadorCkanAdapter, "EC", "datosabiertos.gob.ec"),
         (MexicoCkanAdapter, "MX", "datos.gob.mx"),
+        (PanamaCkanAdapter, "PA", "datosabiertos.gob.pa"),
         (UruguayCkanAdapter, "UY", "catalogodatos.gub.uy"),
     ],
 )

@@ -14,7 +14,7 @@ from opendata_latam_mcp import adapters
 pytestmark = pytest.mark.live
 
 
-SUPPORTED = ["AR", "CL", "DO", "EC", "MX", "UY"]
+SUPPORTED = ["AR", "CL", "DO", "EC", "MX", "PA", "UY"]
 
 
 @pytest.fixture(autouse=True)

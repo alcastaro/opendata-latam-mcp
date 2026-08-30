@@ -10,6 +10,7 @@ from .chile import ChileCkanAdapter
 from .dominican_republic import DominicanRepublicCkanAdapter
 from .ecuador import EcuadorCkanAdapter
 from .mexico import MexicoCkanAdapter
+from .panama import PanamaCkanAdapter
 from .uruguay import UruguayCkanAdapter
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "DominicanRepublicCkanAdapter",
     "EcuadorCkanAdapter",
     "MexicoCkanAdapter",
+    "PanamaCkanAdapter",
     "UruguayCkanAdapter",
 ]
