@@ -8,8 +8,21 @@ version = "0.2.0"
 description = "MCP server unifying Latin American open government data portals (CKAN, Socrata) under one interface."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "Alberto Castillo Aroca" }]
+# SPDX string rather than the deprecated `{ text = "MIT" }` table, so the wheel
+# carries License-Expression, which is what PyPI reads now.
+license = "MIT"
+license-files = ["LICENSE"]
+# Attribution, not ownership transfer. The package and the registry namespace
+# stay under the personal account for continuity with dominican-open-data-mcp,
+# already published under io.github.alcastaro. OLDS is named because the
+# connector's purpose and the observatory's purpose are the same one, and
+# because whoever reads a PyPI page asks who publishes it.
+authors = [
+    { name = "Alberto Castillo Aroca", email = "ai@olds2030.org" },
+]
+maintainers = [
+    { name = "OLDS — Observatorio Latinoamericano de Desarrollo Sostenible", email = "ai@olds2030.org" },
+]
 keywords = [
     "mcp",
     "model-context-protocol",
@@ -23,11 +36,21 @@ keywords = [
     "gobierno-abierto",
 ]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    # 3.13 verified by installing the wheel into a clean 3.13 environment and
+    # listing the tools, not assumed from requires-python.
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     # v2 of the SDK. The upper bound stays because 2.0 is the precedent: it
@@ -60,6 +83,8 @@ opendata-latam-mcp = "opendata_latam_mcp.server:main"
 [project.urls]
 Homepage = "https://github.com/alcastaro/opendata-latam-mcp"
 Repository = "https://github.com/alcastaro/opendata-latam-mcp"
+Issues = "https://github.com/alcastaro/opendata-latam-mcp/issues"
+Changelog = "https://github.com/alcastaro/opendata-latam-mcp/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opendata_latam_mcp"]

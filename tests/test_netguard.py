@@ -111,13 +111,13 @@ async def test_a_redirect_to_the_metadata_endpoint_is_refused(httpx_mock, monkey
     is handed back. With it, the redirect fails closed.
     """
     real_hosts = {
-        "datosabiertos.gob.pa": ["93.184.216.34"],
+        "www.datosabiertos.gob.pa": ["93.184.216.34"],
         "169.254.169.254": ["169.254.169.254"],
     }
     monkeypatch.setattr(netguard, "_resolve", lambda h: real_hosts.get(h, ["93.184.216.34"]))
 
     httpx_mock.add_response(
-        url="https://datosabiertos.gob.pa/api/3/action/package_search?q=%2A%3A%2A&rows=10&start=0",
+        url="https://www.datosabiertos.gob.pa/api/3/action/package_search?q=%2A%3A%2A&rows=10&start=0",
         status_code=302,
         headers={"Location": "http://169.254.169.254/latest/meta-data/"},
     )

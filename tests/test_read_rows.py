@@ -19,7 +19,7 @@ import pytest
 
 from opendata_latam_mcp.adapters.ckan import PanamaCkanAdapter
 
-DS = "https://datosabiertos.gob.pa/api/3/action/datastore_search"
+DS = "https://www.datosabiertos.gob.pa/api/3/action/datastore_search"
 
 
 # ─── The no-URL invariant ─────────────────────────────────────────────────────
