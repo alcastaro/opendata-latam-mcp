@@ -22,3 +22,10 @@ venv/
 
 # uv
 # (uv.lock IS committed for app projects)
+
+# Claude Code local files (NEVER commit)
+CLAUDE.md
+.claude/
+
+# Working notes for the regional integration (not part of the package)
+internal/
