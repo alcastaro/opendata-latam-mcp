@@ -302,6 +302,25 @@ src/opendata_latam_mcp/
 
 - **Adapter pattern as the seam.** Every portal exposes the same `PortalAdapter` Protocol. Adding a country = subclassing + an URL override. CKAN portals share the entire implementation; Socrata and custom portals plug into the same registry.
 - **Country code as primary key.** Every tool requires `country` (ISO alpha-2). The model always knows which portal it's hitting. Errors are scoped to the offending country.
+- **Return, never raise — every tool, every failure.** A tool that fails returns
+  `{"error": ..., "hint": ...}` as an ordinary result: `error` keeps the portal's own
+  message, and `hint` names what to try next. An unsupported country code says to call
+  `list_supported_countries`; a portal answering 403 says the refusal is policy rather
+  than a bad request, so retrying will not help and `cross_country_search` will report it
+  per-country without failing the whole call.
+
+  This is measured, not aspirational. Before it existed, a real client session calling
+  `search_datasets` with a bad country received exactly `Error executing tool
+  search_datasets` and nothing else — the SDK discards the underlying message. A model
+  given that cannot tell a bad argument from a dead portal, so it retries blindly.
+- **Every tool returns an object, never a bare list.** That is what makes the envelope
+  possible: the SDK derives an output schema from the return type and rejects a mismatched
+  shape, so a tool returning a bare list could not return an error envelope. Lists live
+  under a named key (`groups`, `tags`, `suggestions`), which also gives the model the
+  portal context a bare list never carried.
+- **Portal health is machine-readable.** `list_supported_countries` reports a `status` per
+  portal, so a model can route around one that is down instead of spending a turn
+  discovering it.
 - **Cross-country is `asyncio.gather`.** Fan-out in parallel against N portals, return a per-country dict + a summary. Sub-3-second latency across all portals. A portal that fails returns its error inside the result; it does not take the others down.
 - **System trust store for SSL.** Some LatAm portals (notably `datos.gob.mx`) ship incomplete TLS cert chains that `certifi` can't verify. `truststore` injects the OS trust store, which `curl` already uses, so httpx accepts them.
 - **Defensive truncation.** Long descriptions truncated to 300 chars in listings. Cross-country dumps with 6 countries × 10 datasets × multi-KB descriptions would blow context windows without this.

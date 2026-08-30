@@ -302,7 +302,27 @@ src/opendata_latam_mcp/
 ### Decisiones de diseño
 
 - **Adapter pattern como costura.** Cada portal expone el mismo `PortalAdapter` Protocol. Añadir un país = subclasear + un override URL. Los portales CKAN comparten la implementación entera; Socrata y custom se enchufan al mismo registry.
-- **Código país como clave primaria.** Cada tool requiere `country` (ISO alpha-2). El modelo siempre sabe qué portal está consultando. Errores son scoped al país que falla.
+- **Código país como clave primaria.** Cada herramienta requiere `country` (ISO alpha-2). El modelo siempre sabe qué portal está consultando.
+- **Devolver, nunca lanzar — toda herramienta, todo fallo.** Una herramienta que falla
+  devuelve `{"error": ..., "hint": ...}` como resultado ordinario: `error` conserva el
+  mensaje del propio portal y `hint` dice qué intentar a continuación. Un código de país
+  no soportado indica llamar a `list_supported_countries`; un portal que responde 403
+  aclara que el rechazo es política y no una petición mal formada, así que reintentar no
+  sirve, y `cross_country_search` lo reporta por país sin tumbar la llamada entera.
+
+  Esto está medido, no es aspiracional. Antes de existir, una sesión de cliente real
+  llamando a `search_datasets` con un país inválido recibía exactamente `Error executing
+  tool search_datasets` y nada más — el SDK descarta el mensaje subyacente. Un modelo con
+  eso no distingue un argumento equivocado de un portal caído, así que reintenta a ciegas.
+- **Toda herramienta devuelve un objeto, nunca una lista suelta.** Eso es lo que hace
+  posible el sobre: el SDK deriva un esquema de salida del tipo de retorno y rechaza una
+  forma distinta, así que una herramienta que devolviera una lista no podría devolver un
+  sobre de error. Las listas viven bajo una clave con nombre (`groups`, `tags`,
+  `suggestions`), lo que además le da al modelo el contexto del portal que una lista
+  suelta nunca llevaba.
+- **La salud del portal es legible por máquina.** `list_supported_countries` reporta un
+  `status` por portal, para que el modelo pueda rodear uno caído en vez de gastar un turno
+  descubriéndolo.
 - **Cross-country es `asyncio.gather`.** Fan-out en paralelo contra N portales, devuelve dict por país + summary. Latencia sub-3-segundos contra todos los portales. Un portal que falla devuelve su error dentro del resultado; no tumba a los demás.
 - **System trust store para SSL.** Algunos portales LatAm (notablemente `datos.gob.mx`) shipean chains TLS incompletos que `certifi` no puede verificar. `truststore` inyecta el OS trust store, que `curl` ya usa, así httpx los acepta.
 - **Truncado defensivo.** Descripciones largas truncadas a 300 chars en listados. Dumps cross-country con 6 países × 10 datasets × descripciones multi-KB volarían context windows sin esto.

@@ -51,14 +51,17 @@ def list_supported() -> list[dict[str, Any]]:
     """Return list of supported portals (without hitting them)."""
     out = []
     for code, cls in sorted(_ADAPTER_CLASSES.items()):
-        out.append(
-            {
-                "country": code,
-                "portal_name": cls.PORTAL_NAME,
-                "portal_url": cls.PORTAL_URL,
-                "platform": cls.PLATFORM,
-            }
-        )
+        entry = {
+            "country": code,
+            "portal_name": cls.PORTAL_NAME,
+            "portal_url": cls.PORTAL_URL,
+            "platform": cls.PLATFORM,
+            "status": getattr(cls, "STATUS", "ok"),
+        }
+        note = getattr(cls, "STATUS_NOTE", "")
+        if note:
+            entry["status_note"] = note
+        out.append(entry)
     return out
 
 

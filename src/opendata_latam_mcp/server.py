@@ -31,13 +31,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import __version__, adapters
+from .errors import tool_envelope
 from .countries import COUNTRIES, all_codes
 
 logging.basicConfig(
@@ -68,14 +69,22 @@ def _ro(title: str) -> ToolAnnotations:
 
 
 @mcp.tool(annotations=_ro("Países soportados"))
-def list_supported_countries() -> list[dict]:
-    """Return the list of LatAm open-data portals this MCP currently supports.
+@tool_envelope
+async def list_supported_countries() -> dict:
+    """Return the LatAm open-data portals this MCP currently supports.
 
-    Each entry includes ISO country code, portal name, URL, and platform
-    (ckan, socrata, custom). Use this before any other tool to know which
-    country codes are valid.
+    Each entry carries the ISO country code, portal name, URL, platform and a
+    `status`. Call this before any other tool to learn which country codes are
+    valid and which portals are currently answering — `status` is what tells
+    you a country is configured but unreachable, so you can route around it
+    instead of spending a turn discovering it.
     """
-    return adapters.list_supported()
+    portals = adapters.list_supported()
+    return {
+        "count": len(portals),
+        "answering": sum(1 for p in portals if p.get("status") == "ok"),
+        "countries": portals,
+    }
 
 
 # ─── Per-country tools ────────────────────────────────────────────────────────
@@ -99,6 +108,7 @@ CountryArg = Annotated[
 
 
 @mcp.tool(annotations=_ro("Buscar datasets"))
+@tool_envelope
 async def search_datasets(
     country: CountryArg,
     query: Annotated[
@@ -136,6 +146,7 @@ async def search_datasets(
 
 
 @mcp.tool(annotations=_ro("Metadatos de dataset"))
+@tool_envelope
 async def get_dataset(
     country: CountryArg,
     id: Annotated[str, Field(description="Dataset UUID or slug.")],
@@ -150,6 +161,7 @@ async def get_dataset(
 
 
 @mcp.tool(annotations=_ro("Datasets recientes"))
+@tool_envelope
 async def list_recent_datasets(
     country: CountryArg,
     limit: Annotated[int, Field(description="Count (1-30)", ge=1, le=30)] = 10,
@@ -161,6 +173,7 @@ async def list_recent_datasets(
 
 
 @mcp.tool(annotations=_ro("Metadatos de recurso"))
+@tool_envelope
 async def get_resource(
     country: CountryArg,
     id: Annotated[str, Field(description="Resource UUID.")],
@@ -171,6 +184,7 @@ async def get_resource(
 
 
 @mcp.tool(annotations=_ro("Buscar recursos"))
+@tool_envelope
 async def search_resources(
     country: CountryArg,
     query: Annotated[str, Field(description="Resource name (full or partial).")],
@@ -182,17 +196,25 @@ async def search_resources(
 
 
 @mcp.tool(annotations=_ro("Entidades publicadoras"))
+@tool_envelope
 async def list_organizations(
     country: CountryArg,
     limit: Annotated[int, Field(description="Max (1-200)", ge=1, le=200)] = 50,
-) -> list[dict]:
+) -> dict:
     """Government institutions publishing data in a country's portal, with
     per-institution dataset counts."""
     adapter = adapters.get_adapter(country)
-    return await adapter.list_organizations(limit=limit)
+    orgs = await adapter.list_organizations(limit=limit)
+    return {
+        "country": adapter.COUNTRY_CODE,
+        "portal": adapter.PORTAL_NAME,
+        "returned": len(orgs),
+        "organizations": orgs,
+    }
 
 
 @mcp.tool(annotations=_ro("Detalle de entidad"))
+@tool_envelope
 async def get_organization(
     country: CountryArg,
     id: Annotated[str, Field(description="Organization slug or UUID.")],
@@ -203,39 +225,67 @@ async def get_organization(
 
 
 @mcp.tool(annotations=_ro("Categorías temáticas"))
-async def list_groups(country: CountryArg) -> list[dict]:
+@tool_envelope
+async def list_groups(country: CountryArg) -> dict:
     """Thematic categories (economy, health, education, etc.) in a country's portal."""
     adapter = adapters.get_adapter(country)
-    return await adapter.list_groups()
+    groups = await adapter.list_groups()
+    return {
+        "country": adapter.COUNTRY_CODE,
+        "portal": adapter.PORTAL_NAME,
+        "returned": len(groups),
+        "groups": groups,
+    }
 
 
 @mcp.tool(annotations=_ro("Etiquetas"))
+@tool_envelope
 async def list_tags(
     country: CountryArg,
     query: Annotated[str | None, Field(description="Optional prefix.")] = None,
     limit: Annotated[int, Field(description="Max (1-100)", ge=1, le=100)] = 20,
-) -> list[str]:
+) -> dict:
     """List tags available in a country's portal, optionally prefix-filtered."""
     adapter = adapters.get_adapter(country)
-    return await adapter.list_tags(query=query, limit=limit)
+    tags = await adapter.list_tags(query=query, limit=limit)
+    return {
+        "country": adapter.COUNTRY_CODE,
+        "portal": adapter.PORTAL_NAME,
+        "returned": len(tags),
+        "tags": tags,
+    }
 
 
 @mcp.tool(annotations=_ro("Autocompletar"))
+@tool_envelope
 async def autocomplete(
     country: CountryArg,
     kind: Annotated[
-        str,
-        Field(description="One of: dataset, organization, group, tag."),
+        Literal["dataset", "organization", "group", "tag"],
+        Field(description="What to complete: dataset, organization, group or tag."),
     ],
     query: Annotated[str, Field(description="Partial text to complete.")],
     limit: Annotated[int, Field(description="Suggestions (1-30)", ge=1, le=30)] = 10,
-) -> list:
-    """Autocomplete dataset / organization / group / tag names within a country."""
+) -> dict:
+    """Autocomplete dataset / organization / group / tag names within a country.
+
+    `kind` is a closed set enforced by the schema, so an invalid value is
+    rejected by the client before a request is ever made — cheaper than a
+    round-trip that ends in an error.
+    """
     adapter = adapters.get_adapter(country)
-    return await adapter.autocomplete(kind=kind, query=query, limit=limit)
+    suggestions = await adapter.autocomplete(kind=kind, query=query, limit=limit)
+    return {
+        "country": adapter.COUNTRY_CODE,
+        "portal": adapter.PORTAL_NAME,
+        "kind": kind,
+        "returned": len(suggestions),
+        "suggestions": suggestions,
+    }
 
 
 @mcp.tool(annotations=_ro("Estadísticas del portal"))
+@tool_envelope
 async def get_site_stats(country: CountryArg) -> dict:
     """Portal-wide stats for one country: datasets, organizations, groups, tags."""
     adapter = adapters.get_adapter(country)
@@ -246,6 +296,7 @@ async def get_site_stats(country: CountryArg) -> dict:
 
 
 @mcp.tool(annotations=_ro("Leer filas de un recurso"))
+@tool_envelope
 async def read_resource_rows(
     country: CountryArg,
     resource_id: Annotated[
@@ -286,6 +337,7 @@ async def read_resource_rows(
 
 
 @mcp.tool(annotations=_ro("Búsqueda multi-país"))
+@tool_envelope
 async def cross_country_search(
     query: Annotated[
         str,
@@ -350,6 +402,7 @@ async def cross_country_search(
 
 
 @mcp.tool(annotations=_ro("Estadísticas multi-país"))
+@tool_envelope
 async def cross_country_stats() -> dict:
     """Run get_site_stats against every supported country in parallel. Quick
     health check + comparative portal sizes."""

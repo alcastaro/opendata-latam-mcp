@@ -14,7 +14,15 @@ from opendata_latam_mcp import adapters
 pytestmark = pytest.mark.live
 
 
+# Every configured country, and the subset each adapter declares as answering.
+# Driving the "must work" tests off STATUS rather than a literal list turns a
+# permanently-red test into a meaningful one: a portal known to be down does not
+# fail these, and the assertion that it is really down lives in its own test,
+# which fails in BOTH directions — if Ecuador starts answering again, that test
+# goes red and tells us to update the declared status.
 SUPPORTED = ["AR", "CL", "DO", "EC", "MX", "PA", "UY"]
+ANSWERING = [c for c in SUPPORTED if adapters.get_adapter(c).STATUS == "ok"]
+UNREACHABLE = [c for c in SUPPORTED if adapters.get_adapter(c).STATUS != "ok"]
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +33,7 @@ async def _close_adapters():
     await adapters.registry.close_all()
 
 
-@pytest.mark.parametrize("country", SUPPORTED)
+@pytest.mark.parametrize("country", ANSWERING)
 async def test_live_site_stats(country):
     a = adapters.get_adapter(country)
     s = await a.get_site_stats()
@@ -34,7 +42,7 @@ async def test_live_site_stats(country):
     assert s["total_datasets"] > 100  # every gov portal we cover has > 100 datasets
 
 
-@pytest.mark.parametrize("country", SUPPORTED)
+@pytest.mark.parametrize("country", ANSWERING)
 async def test_live_search_one_term(country):
     a = adapters.get_adapter(country)
     r = await a.search_datasets(query="presupuesto", limit=2)
@@ -51,7 +59,7 @@ async def test_live_cross_country_parallel():
     t0 = time.time()
     results = await asyncio.gather(*[
         adapters.get_adapter(c).search_datasets(query="presupuesto", limit=1)
-        for c in SUPPORTED
+        for c in ANSWERING
     ])
     elapsed = time.time() - t0
     assert elapsed < 10.0, f"Parallel cross-country took {elapsed:.1f}s"
@@ -152,7 +160,7 @@ async def _first_dataset(country: str):
     return None, None
 
 
-@pytest.mark.parametrize("country", SUPPORTED)
+@pytest.mark.parametrize("country", ANSWERING)
 async def test_live_every_per_country_tool_answers(country):
     """Exercise all eleven per-country tools against one real portal.
 
@@ -167,46 +175,64 @@ async def test_live_every_per_country_tool_answers(country):
 
     org_slug = None
     orgs = await _tool("list_organizations")(country=country, limit=3)
-    assert isinstance(orgs, list)
-    if orgs:
-        org_slug = orgs[0].get("name") or orgs[0].get("id")
+    assert isinstance(orgs, dict) and "organizations" in orgs
+    if orgs["organizations"]:
+        first = orgs["organizations"][0]
+        org_slug = first.get("name") or first.get("id")
 
+    # Every tool returns a dict. That is a contract, not a coincidence: SDK v2
+    # derives an output schema from the return annotation and validates against
+    # it, so a tool annotated `-> list` cannot return the {"error","hint"}
+    # envelope without raising. Uniform dicts are what make the envelope
+    # possible, and each carries the key its payload lives under.
     checks = {
-        "get_dataset": (_tool("get_dataset")(country=country, id=dataset_id), dict),
-        "list_recent_datasets": (_tool("list_recent_datasets")(country=country, limit=3), dict),
-        "search_resources": (_tool("search_resources")(country=country, query="csv", limit=3), dict),
-        "list_groups": (_tool("list_groups")(country=country), list),
-        "list_tags": (_tool("list_tags")(country=country, limit=5), list),
+        "get_dataset": (_tool("get_dataset")(country=country, id=dataset_id), None),
+        "list_recent_datasets": (_tool("list_recent_datasets")(country=country, limit=3), "datasets"),
+        "search_resources": (_tool("search_resources")(country=country, query="csv", limit=3), "resources"),
+        "list_groups": (_tool("list_groups")(country=country), "groups"),
+        "list_tags": (_tool("list_tags")(country=country, limit=5), "tags"),
         "autocomplete": (
             _tool("autocomplete")(country=country, kind="dataset", query="salud", limit=3),
-            (list, dict),
+            "suggestions",
         ),
-        "get_site_stats": (_tool("get_site_stats")(country=country), dict),
+        "get_site_stats": (_tool("get_site_stats")(country=country), None),
     }
     if resource_id:
-        checks["get_resource"] = (_tool("get_resource")(country=country, id=resource_id), dict)
+        checks["get_resource"] = (_tool("get_resource")(country=country, id=resource_id), None)
     if org_slug:
         checks["get_organization"] = (
             _tool("get_organization")(country=country, id=org_slug),
-            dict,
+            None,
         )
 
     failures = []
-    for name, (coro, expected) in checks.items():
+    for name, (coro, payload_key) in checks.items():
         try:
             out = await coro
         except Exception as e:  # noqa: BLE001 — the point is to report every one
-            failures.append(f"{name}: raised {type(e).__name__}: {e}")
+            failures.append(f"{name}: raised {type(e).__name__}: {e} — no tool may raise")
             continue
-        if not isinstance(out, expected):
-            failures.append(f"{name}: returned {type(out).__name__}, expected {expected}")
+        if not isinstance(out, dict):
+            failures.append(f"{name}: returned {type(out).__name__}, expected dict")
+            continue
+        if "error" in out:
+            # An envelope is an acceptable answer, but it must be actionable.
+            if not out.get("hint"):
+                failures.append(f"{name}: returned an error with no hint")
+            continue
+        if payload_key and payload_key not in out:
+            failures.append(f"{name}: dict without its `{payload_key}` key: {sorted(out)}")
 
     assert not failures, f"{country}: " + " | ".join(failures)
 
 
 async def test_live_catalog_and_cross_country_tools_answer():
-    supported = _tool("list_supported_countries")()
-    assert isinstance(supported, list) and supported
+    supported = await _tool("list_supported_countries")()
+    assert isinstance(supported, dict)
+    assert supported["count"] == len(supported["countries"])
+    # `status` is what lets a model route around a dead portal without spending
+    # a turn on it, so it has to be present on every entry.
+    assert all("status" in c for c in supported["countries"])
 
     search = await _tool("cross_country_search")(query="presupuesto", limit_per_country=2)
     assert set(search) >= {"query", "summary", "by_country", "grand_total_hits"}
@@ -217,3 +243,45 @@ async def test_live_catalog_and_cross_country_tools_answer():
 
     stats = await _tool("cross_country_stats")()
     assert isinstance(stats, dict) and stats
+
+
+# ─── The declared status must match reality ───────────────────────────────────
+
+
+@pytest.mark.parametrize("country", UNREACHABLE)
+async def test_live_declared_unreachable_portal_is_really_unreachable(country):
+    """A portal declared dead must actually be dead — and come back loudly.
+
+    `STATUS = "unreachable"` is a claim this server makes to the model, so it
+    needs the same standard as a coverage figure: measured, not remembered. This
+    test fails in both directions. If the portal is still refusing, it passes and
+    the declaration stands. If it starts answering, this goes red and says so,
+    which is the only reliable way anyone will notice — the "must work" tests
+    skip these countries by design, so nothing else would.
+    """
+    a = adapters.get_adapter(country)
+    assert a.STATUS_NOTE, f"{country}: declared unreachable without saying why"
+    with pytest.raises(RuntimeError) as excinfo:
+        await a.search_datasets(query="presupuesto", limit=1)
+    assert country in str(excinfo.value)
+
+
+@pytest.mark.parametrize("country", UNREACHABLE)
+async def test_live_unreachable_portal_still_returns_an_actionable_envelope(country):
+    """Down is not an excuse for an unhelpful answer.
+
+    The tool layer must still hand the model an error it can act on, rather than
+    an exception or a row of nulls. Ecuador answering 403 is exactly the case
+    that made `get_site_stats` return four `None`s and no error at all.
+    """
+    from opendata_latam_mcp.server import mcp
+
+    for name, args in [
+        ("search_datasets", {"country": country, "query": "presupuesto"}),
+        ("get_site_stats", {"country": country}),
+    ]:
+        out = await mcp._tool_manager.get_tool(name).fn(**args)
+        assert isinstance(out, dict), f"{name} must return a dict even when down"
+        assert out.get("error"), f"{name} must report the failure, not hide it"
+        assert out.get("hint"), f"{name} must say what to try next"
+        assert "null" not in str(out.get("total_datasets", "")).lower()

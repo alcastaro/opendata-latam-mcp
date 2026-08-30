@@ -62,6 +62,13 @@ class CkanAdapter:
     PORTAL_URL: ClassVar[str] = ""
     PLATFORM: ClassVar[str] = "ckan"
 
+    # Machine-readable health, so the model can route around a dead portal
+    # instead of spending a turn discovering it. Prose in a tool description is
+    # not enough: a model that only reads "expect an error" still has to try.
+    # "ok" | "unreachable". Set per adapter, changed only with a measurement.
+    STATUS: ClassVar[str] = "ok"
+    STATUS_NOTE: ClassVar[str] = ""
+
     # Subclasses override at minimum BASE_URL.
     BASE_URL: ClassVar[str] = ""  # e.g. "https://datos.gob.do/api/3/action"
 
@@ -468,33 +475,60 @@ class CkanAdapter:
         return result if isinstance(result, list) else []
 
     async def get_site_stats(self) -> dict[str, Any]:
+        """Portal-wide counts, with the failures named rather than hidden.
+
+        This used to swallow every exception and return `None` for each count.
+        A model reads `None` as "the portal does not publish that figure", not
+        as "the portal is down" — which is the lying-figure failure mode this
+        project fights in other people's portals, self-inflicted. Measured on
+        2026-08-30: with Ecuador answering 403 to everything, this returned four
+        `None`s and no error at all.
+
+        Each probe is still independent, because a portal that answers three of
+        four is more useful than an exception. But what failed is reported.
+        """
         import asyncio
 
-        async def _safe(action: str, params: dict, *, count_key: str = "count") -> int | None:
+        async def _safe(action: str, params: dict, *, count_key: str = "count"):
             try:
                 r = await self._ckan(action, params)
                 if isinstance(r, dict):
-                    return r.get(count_key)
+                    return r.get(count_key), None
                 if isinstance(r, list):
-                    return len(r)
-                return None
-            except Exception:
-                return None
+                    return len(r), None
+                return None, f"{action}: unexpected result type {type(r).__name__}"
+            except Exception as e:  # noqa: BLE001 — reported, not swallowed
+                return None, f"{action}: {e}"
 
-        datasets, orgs, groups, tags = await asyncio.gather(
+        probes = await asyncio.gather(
             _safe("package_search", {"rows": 0, "q": "*:*"}),
             _safe("organization_list", {}),
             _safe("group_list", {}),
             _safe("tag_list", {}),
         )
+        (datasets, e1), (orgs, e2), (groups, e3), (tags, e4) = probes
+        errors = [e for e in (e1, e2, e3, e4) if e]
 
-        return {
+        # Every probe failed: the portal is down, and saying so is the whole
+        # point. Raising here lets the tool envelope classify it and attach a
+        # hint, instead of handing back a row of nulls that reads like data.
+        if len(errors) == len(probes):
+            raise RuntimeError(
+                f"[{self.COUNTRY_CODE}] {self.PORTAL_NAME} answered nothing: {errors[0]}"
+            )
+
+        out: dict[str, Any] = {
             "country": self.COUNTRY_CODE,
             "portal": self.PORTAL_NAME,
             "portal_url": self.PORTAL_URL,
             "platform": self.PLATFORM,
+            "status": self.STATUS,
             "total_datasets": datasets,
             "total_organizations": orgs,
             "total_groups": groups,
             "total_tags": tags,
         }
+        if errors:
+            out["partial"] = True
+            out["errors"] = errors
+        return out
