@@ -4,7 +4,7 @@ Every tool takes a `country` parameter (ISO 3166-1 alpha-2) so the model always
 knows which portal it is hitting. `cross_country_search` fans out to every
 selected portal in parallel — the one thing a single-country MCP cannot do.
 
-**What this server does, and does not, do.** All fourteen tools are
+**What this server does, and does not, do.** Fourteen of the fifteen tools are
 CATALOGUE-level: they search datasets, return metadata, and list organizations,
 groups and tags. **None of them reads a row of data.** There is no DataStore
 query, no file download, no CSV/XLSX parsing here. Reading rows is what the
@@ -12,6 +12,11 @@ dedicated country packages do (`dominican-open-data-mcp`,
 `colombian-open-data-mcp`), and it will arrive here through them rather than
 being reimplemented. Saying so in the tool descriptions is deliberate: a server
 that claims a depth it does not have costs the model a turn to discover.
+
+The exception is `read_resource_rows`, which returns actual rows through the
+CKAN DataStore where a portal has built one. It does not aggregate: the CKAN
+action that would run a GROUP BY server-side answers on Uruguay alone out of the
+six portals measured, so aggregation belongs in a local layer above these rows.
 
 Portals, measured 2026-08-30 by exercising the registered tools:
 AR 1,273 · CL 3,188 · DO 1,062 · MX 1,736 · PA 5,667 · UY 2,702 — 15,628 live.
@@ -235,6 +240,46 @@ async def get_site_stats(country: CountryArg) -> dict:
     """Portal-wide stats for one country: datasets, organizations, groups, tags."""
     adapter = adapters.get_adapter(country)
     return await adapter.get_site_stats()
+
+
+# ─── Reading rows ─────────────────────────────────────────────────────────────
+
+
+@mcp.tool(annotations=_ro("Leer filas de un recurso"))
+async def read_resource_rows(
+    country: CountryArg,
+    resource_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Resource identifier (a CKAN UUID) from `search_resources` or "
+                "`get_dataset`. This is an ID, never a URL."
+            )
+        ),
+    ],
+    limit: Annotated[int, Field(description="Rows to return (1-100).", ge=1, le=100)] = 20,
+    offset: Annotated[int, Field(description="Row offset for pagination.", ge=0)] = 0,
+    q: Annotated[
+        str | None,
+        Field(description="Free-text filter applied across the resource's columns."),
+    ] = None,
+) -> dict:
+    """Read the actual rows of one resource, through the portal's CKAN DataStore.
+
+    This is the only tool here that returns data rather than metadata, and it
+    works only where the portal has built a DataStore table for that resource.
+    Many resources are published as a plain file instead; for those this returns
+    an error saying so, with what to try next.
+
+    It does not aggregate. `datastore_search_sql` — the CKAN action that would
+    run a GROUP BY on the portal — answers on Uruguay alone out of the six
+    national portals measured on 2026-08-30, so minimum, maximum, average and
+    GROUP BY have to be computed locally rather than pushed to the portal.
+    """
+    adapter = adapters.get_adapter(country)
+    return await adapter.read_resource_rows(
+        resource_id, limit=limit, offset=offset, q=q
+    )
 
 
 # ─── Cross-country (the unique value-add of this MCP) ─────────────────────────

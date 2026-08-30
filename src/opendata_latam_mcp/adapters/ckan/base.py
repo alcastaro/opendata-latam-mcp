@@ -40,6 +40,16 @@ DEFAULT_TIMEOUT = 15.0
 # Output trimming so a single call never blows the LLM's context window.
 NOTES_TRUNC = 300
 DESC_TRUNC = 300
+CELL_TRUNC = 200
+MAX_ROWS = 100
+
+# A resource identifier goes straight into the URL we build, so it is validated
+# strictly rather than by a blacklist. That inversion is deliberate: the loose
+# blacklist belongs on COLUMN NAMES, where real portals publish spaces, accents
+# and punctuation that a whitelist wrongly rejects. An identifier has no such
+# excuse — CKAN's are UUIDs — and validating it is the defense against injecting
+# anything into the request path.
+_RESOURCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 
 
 class CkanAdapter:
@@ -273,6 +283,105 @@ class CkanAdapter:
     async def get_resource(self, id: str) -> dict[str, Any]:
         result = await self._ckan("resource_show", {"id": id})
         return self.format_resource(result)
+
+    # ─── Reading rows (DataStore route) ──────────────────────────────────
+
+    async def read_resource_rows(
+        self,
+        resource_id: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        """Read rows of one resource through the CKAN DataStore.
+
+        This is the cheap, polite route: the portal has already built the table,
+        so it filters and paginates server-side and nothing is downloaded. It is
+        also only *one* of the routes a catalogue offers — many resources are
+        published only as a file, and those need the download route, which this
+        adapter does not have yet. Callers get told which case they hit.
+
+        Aggregation is deliberately absent. `datastore_search_sql`, the action
+        that would run a GROUP BY on the portal, was measured on 2026-08-30
+        across six national portals and answers only on Uruguay; everywhere else
+        it is HTTP 400. So min/max/avg/GROUP BY cannot be pushed to the portal
+        and belong in a local layer on top of these rows, not here.
+
+        Takes a resource **identifier**, never a URL. The address is built from
+        this portal's own BASE_URL, so the set of hosts this can reach is bounded
+        by what a government catalogue publishes rather than by what an argument
+        can express.
+
+        Returns `{"error": ..., "hint": ...}` rather than raising: an exception
+        reaches the model as an opaque protocol error it cannot act on, while a
+        hint tells it what to try instead.
+        """
+        if not _RESOURCE_ID.match(resource_id or ""):
+            return {
+                "error": f"[{self.COUNTRY_CODE}] not a valid resource identifier: {resource_id!r}",
+                "hint": (
+                    "Pass the resource `id` from search_resources or get_dataset — "
+                    "a CKAN UUID, not a URL and not a dataset name."
+                ),
+            }
+
+        rows = min(max(int(limit), 1), MAX_ROWS)
+        params: dict[str, Any] = {
+            "resource_id": resource_id,
+            "limit": rows,
+            "offset": max(int(offset), 0),
+        }
+        if q:
+            params["q"] = q
+
+        try:
+            result = await self._ckan("datastore_search", params)
+        except RuntimeError as e:
+            msg = str(e)
+            # The catalogue's `datastore_active` flag lies: in a sibling project
+            # 37 of 59 resources marked queryable answered 404 because the table
+            # was never built. Say so, or the model assumes it asked wrongly.
+            if "404" in msg or "not found" in msg.lower():
+                return {
+                    "error": (
+                        f"[{self.COUNTRY_CODE}] this resource has no DataStore table, "
+                        f"even if the catalogue says it is queryable."
+                    ),
+                    "hint": (
+                        "The catalogue was wrong, not the request. Use get_resource to "
+                        "find the resource's published file URL and read it by hand, or "
+                        "try another resource of the same dataset."
+                    ),
+                    "resource_id": resource_id,
+                }
+            return {"error": msg, "hint": "Portal-side failure. Retry or try another resource."}
+
+        records = result.get("records") or []
+        fields = [
+            {"id": f.get("id"), "type": f.get("type")}
+            for f in (result.get("fields") or [])
+            if f.get("id") != "_id"
+        ]
+        trimmed = []
+        for rec in records:
+            trimmed.append(
+                {
+                    k: (self._truncate(v, CELL_TRUNC) if isinstance(v, str) else v)
+                    for k, v in rec.items()
+                    if k != "_id"
+                }
+            )
+        return {
+            "country": self.COUNTRY_CODE,
+            "portal": self.PORTAL_NAME,
+            "resource_id": resource_id,
+            "route": "ckan_datastore",
+            "total_rows": result.get("total"),
+            "returned": len(trimmed),
+            "fields": fields,
+            "rows": trimmed,
+        }
 
     async def search_resources(self, query: str, limit: int = 10) -> dict[str, Any]:
         result = await self._ckan(
