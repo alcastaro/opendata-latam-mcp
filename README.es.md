@@ -8,7 +8,9 @@
 
 **Servidor [Model Context Protocol](https://modelcontextprotocol.io) unificado que expone los datos abiertos del gobierno de cada país latinoamericano soportado a través de una sola interfaz.**
 
-Una instalación, seis portales, **11,175+ datasets públicos** de Argentina, Chile, República Dominicana, Ecuador, México y Uruguay — buscables, filtrables y consultables cruzando países desde cualquier asistente de IA compatible con MCP (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
+Una instalación, seis portales vivos, **15.628 datasets públicos** de Argentina, Chile, México, Panamá, República Dominicana y Uruguay — buscables y consultables cruzando países desde cualquier asistente de IA compatible con MCP (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
+
+> **Léase esto antes que nada:** todas las herramientas son de **nivel catálogo**. Encuentran datasets y los describen; **no leen sus filas.** Ver [Alcance: qué hace y qué no hace](#alcance-qué-hace-y-qué-no-hace).
 
 ---
 
@@ -34,21 +36,85 @@ La funcionalidad única es `cross_country_search`: una sola llamada consulta tod
 
 ## Por qué existe
 
-Inspirado en [`dominican-open-data-mcp`](https://github.com/alcastaro/datos.gob.do-MCP-server) (el MCP single-country que probó el patrón), `opendata-latam-mcp` lo generaliza vía arquitectura adapter-pattern: cada portal hereda de una interface común `PortalAdapter`, así el mismo set de tools MCP funciona contra cualquier país.
+Este proyecto no empezó siendo regional. Empezó con **dos servidores de un solo país,
+construidos a propósito, uno por plataforma** — porque la única forma de aprender qué
+puede hacer de verdad una familia de portales es llevar un país hasta el fondo.
 
-## Países soportados (v0.1.0)
+- [**`dominican-open-data-mcp`**](https://github.com/alcastaro/datos.gob.do-MCP-server)
+  cubrió **CKAN**, y en su variante más dura: `datos.gob.do` corre CKAN *sin* la
+  extensión DataStore, así que no hay consulta posible y cada fila tiene que salir de un
+  archivo descargado. Ahí se escribieron y se midieron las capas de descarga, detección
+  de codificación, reparación de enlaces y DuckDB.
+- **`colombian-open-data-mcp`** cubrió **Socrata** — `datos.gov.co` y su lenguaje de
+  consulta SoQL, con `WHERE`, `GROUP BY` y agregación corriendo en el servidor. De paso
+  recogió cuatro portales CKAN municipales *con* DataStore, más servicios ArcGIS REST,
+  que es como se descubrió la cadena de tres vías (DataStore → servicio ArcGIS →
+  archivo publicado).
 
-| País | Portal | Plataforma | Datasets verificados |
+Entre los dos cubren las dos plataformas sobre las que corre casi toda América Latina,
+a profundidad real y medida contra portales en vivo, no supuesta. Todo lo aprendido
+haciéndolo está escrito y es la base de este repositorio.
+
+`opendata-latam-mcp` generaliza ese trabajo mediante una arquitectura de adaptadores:
+cada portal hereda de una interfaz común `PortalAdapter`, así el mismo conjunto de
+herramientas MCP funciona contra cualquier país. **Los dos servidores de país no se
+reemplazan — se importarán como bibliotecas**, para que un arreglo en el código de
+seguridad compartido llegue a todos a la vez en vez de tener que aplicarse tres veces.
+
+## Países soportados
+
+Las cifras de abajo se **midieron el 30-ago-2026 invocando las herramientas registradas
+contra los portales en vivo**, no leyendo una bandera del catálogo. Cambian a medida que
+los portales publican.
+
+| País | Portal | Plataforma | Datasets |
 |---|---|---|---|
-| 🇦🇷 Argentina | [`datos.gob.ar`](https://datos.gob.ar) | CKAN 2.7.6 | 1,234 |
-| 🇨🇱 Chile | [`datos.gob.cl`](https://datos.gob.cl) | CKAN (con DataStore) | 2,990 |
-| 🇩🇴 República Dominicana | [`datos.gob.do`](https://datos.gob.do) | CKAN 2.11.3 | 1,054 |
-| 🇪🇨 Ecuador | [`datosabiertos.gob.ec`](https://www.datosabiertos.gob.ec) | CKAN 2.9.3 | 1,573 |
-| 🇲🇽 México | [`datos.gob.mx`](https://www.datos.gob.mx) | CKAN (con DataStore + xloader) | 1,645 |
-| 🇺🇾 Uruguay | [`catalogodatos.gub.uy`](https://catalogodatos.gub.uy) | CKAN (con DataStore + DCAT) | 2,679 |
-| **TOTAL** | | | **11,175** |
+| 🇵🇦 Panamá | [`datosabiertos.gob.pa`](https://datosabiertos.gob.pa) | CKAN 2.11.2 (con DataStore) | 5.667 |
+| 🇨🇱 Chile | [`datos.gob.cl`](https://datos.gob.cl) | CKAN (con DataStore) | 3.188 |
+| 🇺🇾 Uruguay | [`catalogodatos.gub.uy`](https://catalogodatos.gub.uy) | CKAN (con DataStore + DCAT) | 2.702 |
+| 🇲🇽 México | [`datos.gob.mx`](https://www.datos.gob.mx) | CKAN (con DataStore + xloader) | 1.736 |
+| 🇦🇷 Argentina | [`datos.gob.ar`](https://datos.gob.ar) | CKAN 2.7.6 | 1.273 |
+| 🇩🇴 República Dominicana | [`datos.gob.do`](https://datos.gob.do) | CKAN 2.11.3 (sin DataStore) | 1.062 |
+| **TOTAL vivo** | | | **15.628** |
+| 🇪🇨 Ecuador | [`datosabiertos.gob.ec`](https://www.datosabiertos.gob.ec) | CKAN 2.9.3 | **no disponible** |
 
-**Roadmap:** Colombia (Socrata, ~10k datasets) en v0.2 · Brasil (auth custom) en v0.3 · Perú + Bolivia en v0.4.
+**Ecuador está configurado pero no responde.** Desde el 30-ago-2026 el portal devuelve
+HTTP 403 a toda petición — con cualquier User-Agent, sin ninguno, y tanto en la raíz del
+sitio como en el API. Se mantiene en la lista en vez de borrarlo porque un solo punto de
+observación no permite distinguir un portal que cerró el acceso programático de uno que
+bloquea una dirección concreta. Las herramientas con `EC` devuelven un error, no resultados.
+
+**Lo que sigue:** Colombia (5 portales, 2 plataformas, ~11k datasets) vía el paquete
+`colombian-open-data-mcp` · Perú y Paraguay vía un adaptador DKAN · Brasil (token Bearer).
+
+## Alcance: qué hace y qué no hace
+
+**Este servidor busca, no lee.** Las catorce herramientas trabajan sobre el *catálogo*:
+buscan datasets, devuelven sus metadatos y listan las organizaciones, grupos y etiquetas
+que publica un portal. **Ninguna lee una fila de datos.** No hay consulta al DataStore,
+no hay descarga de archivos, no hay parseo de CSV ni de XLSX.
+
+Importa porque casi todos estos portales publican el mismo dato de varias formas, y solo
+algunas de ellas son una tabla consultable. Leer filas de verdad significa encadenar tres
+vías —el DataStore de CKAN, luego un servicio ArcGIS REST, luego el archivo publicado— y
+detenerse en la primera que devuelve filas. Ese trabajo existe, y vive en los dos paquetes
+dedicados por país:
+
+| | Profundidad | Qué puede hacer |
+|---|---|---|
+| [`dominican-open-data-mcp`](https://github.com/alcastaro/datos.gob.do-MCP-server) | Profunda | Descarga el archivo publicado, lo parsea, repara enlaces muertos y lo consulta con SQL vía DuckDB. Su portal **no tiene DataStore**, así que cada fila tiene que salir de un archivo. |
+| `colombian-open-data-mcp` | Profunda | Tres vías encadenadas: DataStore de CKAN → servicio ArcGIS REST → archivo publicado. Cobertura medida: 100% nacional, 89,2% en Bogotá. |
+
+Esos dos se **importarán** en este servidor en vez de reimplementarse, para que un arreglo
+en el código compartido llegue a todos a la vez. Mientras tanto, la descripción honesta de
+este es: te dice qué datasets existen en América Latina y dónde están. Decirlo en las
+descripciones de las herramientas es deliberado — un servidor que promete una profundidad
+que no tiene le cuesta al modelo un turno descubrirlo.
+
+**El servidor no guarda nada.** Ni caché, ni espejo, ni copias de los datos de nadie.
+Conservar estos datasets convertiría a quien lo opere en responsable del tratamiento bajo
+la Ley 1581 de Colombia y sus equivalentes. Es una decisión tomada a propósito, no un
+efecto secundario de no haber construido todavía una caché.
 
 ## Herramientas expuestas
 
@@ -176,7 +242,7 @@ Editá `~/.gemini/settings.json`:
 
 > *¿Qué país de LatAm publica más datos abiertos?*
 
-→ `cross_country_stats()` → devuelve Chile 2,990 / Uruguay 2,679 / México 1,645 / Ecuador 1,573 / Argentina 1,234 / República Dominicana 1,054.
+→ `cross_country_stats()` → devuelve Panamá 5.667 / Chile 3.188 / Uruguay 2.702 / México 1.736 / Argentina 1.273 / República Dominicana 1.062.
 
 ### Drill down
 
@@ -210,7 +276,7 @@ src/opendata_latam_mcp/
 
 - **Adapter pattern como costura.** Cada portal expone el mismo `PortalAdapter` Protocol. Añadir un país = subclasear + un override URL. Los portales CKAN comparten la implementación entera; Socrata y custom se enchufan al mismo registry.
 - **Código país como clave primaria.** Cada tool requiere `country` (ISO alpha-2). El modelo siempre sabe qué portal está consultando. Errores son scoped al país que falla.
-- **Cross-country es `asyncio.gather`.** Fan-out en paralelo contra N portales, devuelve dict por país + summary. Latencia sub-3-segundos para 6 portales.
+- **Cross-country es `asyncio.gather`.** Fan-out en paralelo contra N portales, devuelve dict por país + summary. Latencia sub-3-segundos contra todos los portales. Un portal que falla devuelve su error dentro del resultado; no tumba a los demás.
 - **System trust store para SSL.** Algunos portales LatAm (notablemente `datos.gob.mx`) shipean chains TLS incompletos que `certifi` no puede verificar. `truststore` inyecta el OS trust store, que `curl` ya usa, así httpx los acepta.
 - **Truncado defensivo.** Descripciones largas truncadas a 300 chars en listados. Dumps cross-country con 6 países × 10 datasets × descripciones multi-KB volarían context windows sin esto.
 - **FastMCP idiomático.** Args tipados con Pydantic; sin schema manual. Cada tool es una función decorada.
@@ -224,10 +290,24 @@ src/opendata_latam_mcp/
 
 ## Roadmap
 
-- **v0.1** — 6 países CKAN (AR, CL, DO, EC, MX, UY) · cross-country search + stats · este release.
-- **v0.2** — Colombia vía Socrata SODA API (10,000+ datasets).
-- **v0.3** — Brasil vía adapter custom `dados.gov.br` (Bearer auth).
-- **v0.4** — Perú (bypass CloudWAF) y Bolivia (bypass anti-bot).
+- **v0.1** — 7 países CKAN (AR, CL, DO, EC, MX, PA, UY) · cross-country search + stats.
+- **v0.2** — Colombia a través del paquete `colombian-open-data-mcp`: 5 portales en
+  2 plataformas (Socrata a nivel nacional, CKAN para Bogotá, Cali, Valle del Cauca y
+  Cartagena). Importado como biblioteca, no copiado, para que un arreglo en el código de
+  seguridad compartido llegue a todos los servidores que lo usan.
+- **v0.3** — Leer filas, empezando por el DataStore de CKAN. Es una capacidad de la
+  familia CKAN y no de un país concreto, así que aterriza en `adapters/ckan/base.py` y
+  levanta a Panamá, Chile, México y Uruguay de una sola vez.
+- **v0.4** — Perú y Paraguay vía un adaptador DKAN. **Perú NO está «protegido por CloudWAF»** —
+  esa afirmación anterior era falsa y la medición del 30-ago-2026 la desmintió. Perú corre
+  DKAN sobre Drupal 7 y sirve un API de acciones de CKAN *parcial*: funcionan
+  `package_list` (4.670 datasets), `package_show` y `group_list`, mientras que
+  `package_search`, `organization_list`, `tag_list` y `resource_search` devuelven 404.
+  No hay búsqueda del lado del servidor, así que cualquier búsqueda sobre Perú será del
+  lado del cliente y así se declarará.
+- **v0.4+** — Brasil (`dados.gov.br`, token Bearer por registro de desarrollador).
+  Bolivia y Guatemala responden HTTP 403 a todo; **este proyecto no suplanta un navegador
+  para sortear un WAF**, así que quedan sin soporte salvo que se abran.
 - **v0.5** — Portar la capa analytics de `dominican-open-data-mcp` (cache DuckDB, `filter_resource`, `aggregate_resource`, `query_resource`) así el mismo escape hatch SQL funciona contra cualquier recurso de portal cacheado.
 - **v0.6** — Analytics cross-country: `compare_indicators`, `find_equivalent_datasets`, alineación de series temporales entre países.
 
@@ -235,8 +315,8 @@ Ver [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 
 ## Limitaciones conocidas
 
-- v0.1 devuelve solo metadata. Sin filter/aggregate/SQL hasta v0.5.
-- Colombia, Brasil, Perú, Bolivia aún no soportados.
+- Solo metadatos — ver la sección de alcance más arriba.
+- Ecuador no responde; Colombia, Brasil, Perú, Paraguay y Bolivia aún no soportados.
 - Queries cross-country son tan lentas como el portal más lento.
 - La calidad de datos de cada portal es la que entrega el gobierno publicador; este MCP no normaliza schemas entre países (planeado para v0.6).
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.alcastaro/opendata-latam-mcp",
-  "description": "Unified MCP for Latin American open government data portals (6 countries).",
+  "description": "Unified MCP that searches the open government data catalogues of Latin America — 7 portals, one country-code parameter, plus parallel cross-country search.",
   "version": "0.1.0",
   "repository": {
     "url": "https://github.com/alcastaro/opendata-latam-mcp",

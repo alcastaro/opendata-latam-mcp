@@ -8,7 +8,9 @@
 
 **A unified [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the open government data of every supported Latin American country through a single interface.**
 
-One install, six portals, **11,175+ public datasets** from Argentina, Chile, Dominican Republic, Ecuador, Mexico, and Uruguay — searchable, filterable, and cross-country queryable from any MCP-compatible AI assistant (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
+One install, six live portals, **15,628 public datasets** from Argentina, Chile, Dominican Republic, Mexico, Panama, and Uruguay — searchable and cross-country queryable from any MCP-compatible AI assistant (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
+
+> **Read this before anything else:** every tool here is **catalogue-level**. It finds datasets and describes them; **it does not read their rows.** See [Scope: what this does and does not do](#scope-what-this-does-and-does-not-do).
 
 ---
 
@@ -34,21 +36,85 @@ The unique feature is `cross_country_search`: a single tool call queries every s
 
 ## Why this exists
 
-Inspired by [`dominican-open-data-mcp`](https://github.com/alcastaro/datos.gob.do-MCP-server) (the single-country MCP that proved the pattern), `opendata-latam-mcp` generalizes it through an adapter-pattern architecture: every portal subclasses a common `PortalAdapter` interface, so the same set of MCP tools works against any country.
+This project did not start regional. It started with **two single-country servers,
+built deliberately, one per platform** — because the only way to learn what a portal
+family can actually do is to take one country all the way down.
 
-## Supported countries (v0.1.0)
+- [**`dominican-open-data-mcp`**](https://github.com/alcastaro/datos.gob.do-MCP-server)
+  covered **CKAN**, and the hardest variant of it: `datos.gob.do` runs CKAN *without*
+  the DataStore extension, so no query is possible and every row has to come out of a
+  downloaded file. That is where the download, encoding-detection, link-repair and
+  DuckDB layers were written and measured.
+- **`colombian-open-data-mcp`** covered **Socrata** — `datos.gov.co` and its SoQL query
+  language, with `WHERE`, `GROUP BY` and aggregation running on the server. It also
+  picked up four CKAN municipal portals *with* DataStore along the way, plus ArcGIS REST
+  services, which is how the three-route chain (DataStore → ArcGIS service → published
+  file) was found.
 
-| Country | Portal | Platform | Datasets verified |
+Between them, those two servers cover the two platforms that most of Latin America
+runs on, at real depth, measured against live portals rather than assumed. Everything
+that was learned doing it is written down and is what this repository is built from.
+
+`opendata-latam-mcp` generalizes that work through an adapter-pattern architecture:
+every portal subclasses a common `PortalAdapter` interface, so the same set of MCP
+tools works against any country. **The two country servers are not being replaced —
+they will be imported as libraries**, so a fix in the shared security code reaches
+every server at once instead of having to be applied three times.
+
+## Supported countries
+
+Counts below were **measured on 2026-08-30 by calling the registered tools against
+the live portals**, not read off a catalogue flag. They move as the portals publish.
+
+| Country | Portal | Platform | Datasets |
 |---|---|---|---|
-| 🇦🇷 Argentina | [`datos.gob.ar`](https://datos.gob.ar) | CKAN 2.7.6 | 1,234 |
-| 🇨🇱 Chile | [`datos.gob.cl`](https://datos.gob.cl) | CKAN (with DataStore) | 2,990 |
-| 🇩🇴 Dominican Republic | [`datos.gob.do`](https://datos.gob.do) | CKAN 2.11.3 | 1,054 |
-| 🇪🇨 Ecuador | [`datosabiertos.gob.ec`](https://www.datosabiertos.gob.ec) | CKAN 2.9.3 | 1,573 |
-| 🇲🇽 Mexico | [`datos.gob.mx`](https://www.datos.gob.mx) | CKAN (with DataStore + xloader) | 1,645 |
-| 🇺🇾 Uruguay | [`catalogodatos.gub.uy`](https://catalogodatos.gub.uy) | CKAN (with DataStore + DCAT) | 2,679 |
-| **TOTAL** | | | **11,175** |
+| 🇵🇦 Panama | [`datosabiertos.gob.pa`](https://datosabiertos.gob.pa) | CKAN 2.11.2 (with DataStore) | 5,667 |
+| 🇨🇱 Chile | [`datos.gob.cl`](https://datos.gob.cl) | CKAN (with DataStore) | 3,188 |
+| 🇺🇾 Uruguay | [`catalogodatos.gub.uy`](https://catalogodatos.gub.uy) | CKAN (with DataStore + DCAT) | 2,702 |
+| 🇲🇽 Mexico | [`datos.gob.mx`](https://www.datos.gob.mx) | CKAN (with DataStore + xloader) | 1,736 |
+| 🇦🇷 Argentina | [`datos.gob.ar`](https://datos.gob.ar) | CKAN 2.7.6 | 1,273 |
+| 🇩🇴 Dominican Republic | [`datos.gob.do`](https://datos.gob.do) | CKAN 2.11.3 (no DataStore) | 1,062 |
+| **TOTAL live** | | | **15,628** |
+| 🇪🇨 Ecuador | [`datosabiertos.gob.ec`](https://www.datosabiertos.gob.ec) | CKAN 2.9.3 | **unavailable** |
 
-**Roadmap:** Colombia (Socrata, ~10k datasets) in v0.2 · Brazil (custom auth) in v0.3 · Peru + Bolivia in v0.4.
+**Ecuador is configured but not answering.** Since 2026-08-30 the portal returns
+HTTP 403 to every request — with any User-Agent, with none, and on the site root as
+well as the API. It is kept in the list rather than deleted because one vantage point
+cannot distinguish a portal that closed programmatic access from one that blocks a
+particular address. Tools targeting `EC` return an error, not results.
+
+**Next:** Colombia (5 portals, 2 platforms, ~11k datasets) via the
+`colombian-open-data-mcp` package · Peru and Paraguay via a DKAN adapter · Brazil
+(Bearer token).
+
+## Scope: what this does and does not do
+
+**This server is a finder, not a reader.** All fourteen tools work on the *catalogue*:
+they search datasets, return their metadata, and list the organizations, groups and
+tags a portal publishes. **Not one of them reads a row of data.** There is no
+DataStore query, no file download, no CSV/XLSX parsing here.
+
+That matters because most of these portals publish the same dataset several ways, and
+only some of those ways are a queryable table. Reading rows properly means chaining
+three routes — the CKAN DataStore, then an ArcGIS REST service, then the published
+file — and stopping at the first that returns rows. That work exists, and it lives in
+the two dedicated country packages:
+
+| | Depth | What it can do |
+|---|---|---|
+| [`dominican-open-data-mcp`](https://github.com/alcastaro/datos.gob.do-MCP-server) | Deep | Downloads the published file, parses it, repairs dead links, and queries it with SQL through DuckDB. Its portal has **no DataStore**, so every row has to come out of a file. |
+| `colombian-open-data-mcp` | Deep | Three chained routes — CKAN DataStore → ArcGIS REST service → published file. Measured coverage: 100% nationally, 89.2% for Bogotá. |
+
+Those two will be **imported** into this server rather than reimplemented, so a fix in
+the shared code reaches every server at once. Until then, the honest description of
+this one is: it tells you which datasets exist across Latin America and where they
+are. Saying so in the tool descriptions is deliberate — a server that claims a depth
+it does not have costs the model a turn to find out.
+
+**The server stores nothing.** No cache, no mirror, no copies of anyone's data.
+Keeping these datasets would make whoever runs it a data controller under Colombia's
+Ley 1581 and its equivalents elsewhere. That is a decision taken on purpose, not a
+side effect of not having built a cache yet.
 
 ## Tools exposed
 
@@ -176,7 +242,7 @@ Edit `~/.gemini/settings.json`:
 
 > *Which LatAm country publishes the most open data?*
 
-→ `cross_country_stats()` → returns Chile 2,990 / Uruguay 2,679 / Mexico 1,645 / Ecuador 1,573 / Argentina 1,234 / Dominican Republic 1,054.
+→ `cross_country_stats()` → returns Panama 5,667 / Chile 3,188 / Uruguay 2,702 / Mexico 1,736 / Argentina 1,273 / Dominican Republic 1,062.
 
 ### Drill down
 
@@ -210,7 +276,7 @@ src/opendata_latam_mcp/
 
 - **Adapter pattern as the seam.** Every portal exposes the same `PortalAdapter` Protocol. Adding a country = subclassing + an URL override. CKAN portals share the entire implementation; Socrata and custom portals plug into the same registry.
 - **Country code as primary key.** Every tool requires `country` (ISO alpha-2). The model always knows which portal it's hitting. Errors are scoped to the offending country.
-- **Cross-country is `asyncio.gather`.** Fan-out in parallel against N portals, return a per-country dict + a summary. Sub-3-second latency for 6 portals.
+- **Cross-country is `asyncio.gather`.** Fan-out in parallel against N portals, return a per-country dict + a summary. Sub-3-second latency across all portals. A portal that fails returns its error inside the result; it does not take the others down.
 - **System trust store for SSL.** Some LatAm portals (notably `datos.gob.mx`) ship incomplete TLS cert chains that `certifi` can't verify. `truststore` injects the OS trust store, which `curl` already uses, so httpx accepts them.
 - **Defensive truncation.** Long descriptions truncated to 300 chars in listings. Cross-country dumps with 6 countries × 10 datasets × multi-KB descriptions would blow context windows without this.
 - **Idiomatic FastMCP.** Pydantic-typed args; no manual schema. Every tool is one decorated function.
@@ -224,10 +290,24 @@ src/opendata_latam_mcp/
 
 ## Roadmap
 
-- **v0.1** — 6 CKAN countries (AR, CL, DO, EC, MX, UY) · cross-country search + stats · this release.
-- **v0.2** — Colombia via Socrata SODA API (10,000+ datasets).
-- **v0.3** — Brazil via custom `dados.gov.br` adapter (Bearer auth).
-- **v0.4** — Peru (CloudWAF bypass) and Bolivia (anti-bot bypass).
+- **v0.1** — 7 CKAN countries (AR, CL, DO, EC, MX, PA, UY) · cross-country search + stats.
+- **v0.2** — Colombia through the `colombian-open-data-mcp` package: 5 portals across
+  2 platforms (Socrata nationally, CKAN for Bogotá, Cali, Valle del Cauca, Cartagena).
+  Imported as a library, not copied, so a fix in the shared security code reaches
+  every server that uses it.
+- **v0.3** — Reading rows, starting with the CKAN DataStore. It is a capability of the
+  CKAN family rather than of any one country, so it lands in `adapters/ckan/base.py`
+  and lifts Panama, Chile, Mexico and Uruguay at once.
+- **v0.4** — Peru and Paraguay through a DKAN adapter. **Peru is not "CloudWAF-protected"** —
+  that earlier claim was wrong, and measurement on 2026-08-30 disproved it. Peru runs
+  DKAN on Drupal 7 and serves a *partial* CKAN action API: `package_list` (4,670
+  datasets), `package_show` and `group_list` work, while `package_search`,
+  `organization_list`, `tag_list` and `resource_search` all return 404. There is no
+  server-side search, so any search over Peru is client-side and will say so.
+- **v0.4+** — Brazil (`dados.gov.br`, Bearer token via developer registration).
+  Bolivia and Guatemala answer HTTP 403 to everything; **this project does not
+  impersonate a browser to get past a WAF**, so they stay unsupported unless they
+  open up.
 - **v0.5** — Port the analytics layer from `dominican-open-data-mcp` (DuckDB cache, `filter_resource`, `aggregate_resource`, `query_resource`) so the same SQL escape hatch works against every cached portal resource.
 - **v0.6** — Cross-country analytics: `compare_indicators`, `find_equivalent_datasets`, time-series alignment across countries.
 
@@ -235,8 +315,8 @@ See [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 
 ## Known limitations
 
-- v0.1 returns metadata only. No filter/aggregate/SQL until v0.5.
-- Colombia, Brazil, Peru, Bolivia are not yet supported.
+- Metadata only — see the scope section above.
+- Ecuador is unreachable; Colombia, Brazil, Peru, Paraguay and Bolivia are not yet supported.
 - Cross-country queries are as slow as the slowest single portal.
 - Each portal's data quality is whatever the publishing government provides; this MCP doesn't normalize schemas across countries (that's planned for v0.6).
 
