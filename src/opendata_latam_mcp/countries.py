@@ -31,9 +31,17 @@ class Country:
 #   PY Paraguay— DKAN too, and thinner: only package_list (434) and group_list.
 #   CO Colombia— two platforms (Socrata national + CKAN municipal); comes from
 #                the colombian-open-data-mcp package, not from here.
-#   BR Brasil  — HTTP 401, Bearer token via developer registration.
-#   BO, GT     — HTTP 403 to everything, same shape as Ecuador.
-#   CR         — ArcGIS Hub, not CKAN.
+#   CR Costa Rica — `datos.go.cr` is CKAN 2.11.3 and all seven actions answer.
+#                A drop-in like Panama, but nearly empty: 13 datasets. (The old
+#                host datosabiertos.presidencia.go.cr no longer resolves — a DNS
+#                miss is not proof a country has no portal.)
+#   BR Brasil  — `/api/3/action/package_list` answers HTTP 401 with
+#                `www-authenticate: Bearer`. So it IS the CKAN API, not a custom
+#                one: this adapter plus an Authorization header, not a new client.
+#   BO, GT     — HTTP 403 to everything, same shape as Ecuador. Not forced.
+#   CU, SV, HT, HN, NI, VE — no national portal found at the usual host names.
+#                Not probed exhaustively; needs a candidate sweep before writing
+#                any of them off. Full survey: internal/plan/COBERTURA_REGIONAL.md
 COUNTRIES: dict[str, Country] = {
     "AR": Country("AR", "Argentina", "Argentina"),
     "CL": Country("CL", "Chile", "Chile"),
