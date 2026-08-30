@@ -1,8 +1,8 @@
-"""opendata-latam-mcp — FastMCP server.
+"""opendata-latam-mcp — MCP server over Latin American open-data portals.
 
-Unifies LatAm gov open-data portals under one MCP. Every tool takes a
-`country` parameter (ISO alpha-2 code) so the model knows which portal it
-hits. cross_country_search fans out to every supported portal in parallel.
+Every tool takes a `country` parameter (ISO 3166-1 alpha-2) so the model always
+knows which portal it is hitting. `cross_country_search` fans out to every
+selected portal in parallel — the one thing a single-country MCP cannot do.
 """
 
 from __future__ import annotations
@@ -12,10 +12,11 @@ import logging
 import sys
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from . import adapters
+from . import __version__, adapters
 from .countries import COUNTRIES, all_codes
 
 logging.basicConfig(
@@ -25,13 +26,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("opendata-latam-mcp")
 
-mcp = FastMCP("opendata-latam-mcp")
+# `version` is a real constructor argument in SDK v2. Under v1 it was not, so the
+# low-level server fell back to the installed SDK's version and every client's
+# `initialize` handshake reported the SDK version as ours. Passing it here is the
+# fix, and it is invisible from inside the server — hence the test that asserts it.
+mcp = MCPServer("opendata-latam-mcp", version=__version__)
+
+
+def _ro(title: str) -> ToolAnnotations:
+    """Annotations for a read-only tool that talks to a public portal.
+
+    Every tool in this server reads; none writes anything anywhere. The Claude
+    connectors directory requires a title and `readOnlyHint` on every tool, and
+    the hint is what lets a client skip a confirmation prompt it does not need.
+    """
+    return ToolAnnotations(title=title, read_only_hint=True, open_world_hint=True)
 
 
 # ─── Catalog / discovery ──────────────────────────────────────────────────────
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Países soportados"))
 def list_supported_countries() -> list[dict]:
     """Return the list of LatAm open-data portals this MCP currently supports.
 
@@ -58,7 +73,7 @@ CountryArg = Annotated[
 ]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Buscar datasets"))
 async def search_datasets(
     country: CountryArg,
     query: Annotated[
@@ -95,7 +110,7 @@ async def search_datasets(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Metadatos de dataset"))
 async def get_dataset(
     country: CountryArg,
     id: Annotated[str, Field(description="Dataset UUID or slug.")],
@@ -109,7 +124,7 @@ async def get_dataset(
     return await adapter.get_dataset(id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Datasets recientes"))
 async def list_recent_datasets(
     country: CountryArg,
     limit: Annotated[int, Field(description="Count (1-30)", ge=1, le=30)] = 10,
@@ -120,7 +135,7 @@ async def list_recent_datasets(
     return await adapter.list_recent_datasets(limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Metadatos de recurso"))
 async def get_resource(
     country: CountryArg,
     id: Annotated[str, Field(description="Resource UUID.")],
@@ -130,7 +145,7 @@ async def get_resource(
     return await adapter.get_resource(id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Buscar recursos"))
 async def search_resources(
     country: CountryArg,
     query: Annotated[str, Field(description="Resource name (full or partial).")],
@@ -141,7 +156,7 @@ async def search_resources(
     return await adapter.search_resources(query=query, limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Entidades publicadoras"))
 async def list_organizations(
     country: CountryArg,
     limit: Annotated[int, Field(description="Max (1-200)", ge=1, le=200)] = 50,
@@ -152,7 +167,7 @@ async def list_organizations(
     return await adapter.list_organizations(limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Detalle de entidad"))
 async def get_organization(
     country: CountryArg,
     id: Annotated[str, Field(description="Organization slug or UUID.")],
@@ -162,14 +177,14 @@ async def get_organization(
     return await adapter.get_organization(id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Categorías temáticas"))
 async def list_groups(country: CountryArg) -> list[dict]:
     """Thematic categories (economy, health, education, etc.) in a country's portal."""
     adapter = adapters.get_adapter(country)
     return await adapter.list_groups()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Etiquetas"))
 async def list_tags(
     country: CountryArg,
     query: Annotated[str | None, Field(description="Optional prefix.")] = None,
@@ -180,7 +195,7 @@ async def list_tags(
     return await adapter.list_tags(query=query, limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Autocompletar"))
 async def autocomplete(
     country: CountryArg,
     kind: Annotated[
@@ -195,7 +210,7 @@ async def autocomplete(
     return await adapter.autocomplete(kind=kind, query=query, limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Estadísticas del portal"))
 async def get_site_stats(country: CountryArg) -> dict:
     """Portal-wide stats for one country: datasets, organizations, groups, tags."""
     adapter = adapters.get_adapter(country)
@@ -205,7 +220,7 @@ async def get_site_stats(country: CountryArg) -> dict:
 # ─── Cross-country (the unique value-add of this MCP) ─────────────────────────
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Búsqueda multi-país"))
 async def cross_country_search(
     query: Annotated[
         str,
@@ -269,7 +284,7 @@ async def cross_country_search(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ro("Estadísticas multi-país"))
 async def cross_country_stats() -> dict:
     """Run get_site_stats against every supported country in parallel. Quick
     health check + comparative portal sizes."""
