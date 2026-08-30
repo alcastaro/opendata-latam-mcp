@@ -18,6 +18,8 @@ from typing import Any, ClassVar
 
 import httpx
 
+from ... import __version__
+
 # Some LatAm gov portals (e.g. datos.gob.mx) ship an incomplete TLS cert chain.
 # curl works because it reads the macOS / Windows / Linux system trust store.
 # Python's httpx defaults to certifi which is narrower. Build a context backed
@@ -34,7 +36,7 @@ except Exception:
 # 200 to "opendata-latam-mcp/0.1 (MCP Server)". We still identify ourselves
 # honestly and by name — this is not browser impersonation, which this project
 # does not do. Keep the project URL out of this string or Mexico breaks again.
-USER_AGENT = "opendata-latam-mcp/0.1 (MCP Server)"
+USER_AGENT = f"opendata-latam-mcp/{__version__} (MCP Server)"
 DEFAULT_TIMEOUT = 15.0
 
 # Output trimming so a single call never blows the LLM's context window.
