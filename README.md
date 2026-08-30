@@ -89,10 +89,36 @@ particular address. Tools targeting `EC` return an error, not results.
 
 ## Scope: what this does and does not do
 
-**This server is a finder, not a reader.** All fourteen tools work on the *catalogue*:
-they search datasets, return their metadata, and list the organizations, groups and
-tags a portal publishes. **Not one of them reads a row of data.** There is no
-DataStore query, no file download, no CSV/XLSX parsing here.
+**Fourteen of the fifteen tools find; one reads.** The fourteen work on the
+*catalogue*: they search datasets, return their metadata, and list the organizations,
+groups and tags a portal publishes. `read_resource_rows` is the exception — it returns
+actual rows, through the portal's CKAN DataStore, wherever the portal has built one for
+that resource. There is still no file download and no CSV/XLSX parsing here.
+
+**How far the row reading reaches, measured 2026-08-30** by calling the registered tool
+against 40 datasets per country, sampled one per catalogue offset rather than in pages:
+
+| Country | Datasets sampled | Returned rows | Coverage |
+|---|---|---|---|
+| Mexico | 40 | 39 | 97.5% |
+| Uruguay | 40 | 38 | 95.0% |
+| Argentina | 40 | 26 | 65.0% |
+| Chile | 40 | 15 | 37.5% |
+| Panama | 40 | 11 | 27.5% |
+| **All five** | **200** | **129** | **64.5%** |
+
+Reproduce it with `uv run python -m opendata_latam_mcp.sweep --countries AR,CL,MX,PA,UY
+--per-country 40 --seed 42`. The gap is not a bug: the DataStore covers a fraction of
+any catalogue, and everything else is published as a plain file. Panama is the sharpest
+case — the largest catalogue here and the lowest coverage, so size and readability do
+not travel together.
+
+**It does not aggregate, and that is a measurement rather than an omission.**
+`datastore_search_sql`, the CKAN action that would run a `GROUP BY` on the portal, was
+tried against six national portals on 2026-08-30 and answers only on Uruguay; everywhere
+else it is HTTP 400. Minimum, maximum, average and `GROUP BY` therefore cannot be pushed
+to a portal and belong in a local layer above these rows. That is exactly why the
+Dominican server has a DuckDB layer — it was the only option, not a preference.
 
 That matters because most of these portals publish the same dataset several ways, and
 only some of those ways are a queryable table. Reading rows properly means chaining
@@ -118,7 +144,7 @@ side effect of not having built a cache yet.
 
 ## Tools exposed
 
-14 tools total: 11 per-country, 2 cross-country, 1 catalog.
+15 tools total: 11 per-country catalogue, 1 per-country row reading, 2 cross-country, 1 catalog.
 
 ### Catalog
 

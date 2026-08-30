@@ -89,10 +89,37 @@ bloquea una dirección concreta. Las herramientas con `EC` devuelven un error, n
 
 ## Alcance: qué hace y qué no hace
 
-**Este servidor busca, no lee.** Las catorce herramientas trabajan sobre el *catálogo*:
-buscan datasets, devuelven sus metadatos y listan las organizaciones, grupos y etiquetas
-que publica un portal. **Ninguna lee una fila de datos.** No hay consulta al DataStore,
-no hay descarga de archivos, no hay parseo de CSV ni de XLSX.
+**Catorce de las quince herramientas buscan; una lee.** Las catorce trabajan sobre el
+*catálogo*: buscan datasets, devuelven sus metadatos y listan las organizaciones, grupos
+y etiquetas que publica un portal. `read_resource_rows` es la excepción — devuelve filas
+de verdad, a través del DataStore de CKAN del portal, allí donde el portal haya construido
+una tabla para ese recurso. Sigue sin haber descarga de archivos ni parseo de CSV o XLSX.
+
+**Hasta dónde llega esa lectura, medido el 30-ago-2026** invocando la herramienta
+registrada contra 40 datasets por país, muestreando uno por desplazamiento del catálogo en
+vez de por páginas enteras:
+
+| País | Datasets muestreados | Devolvieron filas | Cobertura |
+|---|---|---|---|
+| México | 40 | 39 | 97,5% |
+| Uruguay | 40 | 38 | 95,0% |
+| Argentina | 40 | 26 | 65,0% |
+| Chile | 40 | 15 | 37,5% |
+| Panamá | 40 | 11 | 27,5% |
+| **Los cinco** | **200** | **129** | **64,5%** |
+
+Se reproduce con `uv run python -m opendata_latam_mcp.sweep --countries AR,CL,MX,PA,UY
+--per-country 40 --seed 42`. La diferencia no es un defecto: el DataStore cubre una
+fracción de cualquier catálogo y el resto se publica como archivo suelto. Panamá es el
+caso más marcado — el catálogo más grande de aquí y la cobertura más baja, así que tamaño
+y legibilidad no van juntos.
+
+**No agrega, y eso es una medición y no una omisión.** `datastore_search_sql`, la acción
+de CKAN que correría un `GROUP BY` en el portal, se probó contra seis portales nacionales
+el 30-ago-2026 y responde solo en Uruguay; en todos los demás es HTTP 400. El mínimo, el
+máximo, el promedio y el `GROUP BY` no se le pueden pedir al portal y pertenecen a una capa
+local por encima de estas filas. Es exactamente por eso que el servidor dominicano tiene
+una capa DuckDB — era la única opción, no una preferencia.
 
 Importa porque casi todos estos portales publican el mismo dato de varias formas, y solo
 algunas de ellas son una tabla consultable. Leer filas de verdad significa encadenar tres
@@ -118,7 +145,7 @@ efecto secundario de no haber construido todavía una caché.
 
 ## Herramientas expuestas
 
-14 tools en total: 11 por país, 2 cross-país, 1 catálogo.
+15 tools en total: 11 de catálogo por país, 1 de lectura de filas por país, 2 cross-país, 1 catálogo.
 
 ### Catálogo
 
