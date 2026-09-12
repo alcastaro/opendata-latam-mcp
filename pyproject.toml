@@ -121,7 +121,6 @@ select = ["E", "F", "I", "B", "C4", "UP", "S", "BLE", "RUF"]
 ignore = [
     "E501",    # line length is handled by the formatter
     "S101",    # assert is how tests assert
-    "UP038",   # isinstance tuples are clearer than the union form here
 ]
 
 [tool.ruff.lint.per-file-ignores]

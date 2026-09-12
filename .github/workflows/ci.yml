@@ -13,7 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # 3.13 is in the classifiers, so it is in the matrix: a version the
+        # package claims to support and CI never runs is a claim, not a fact.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -53,11 +55,23 @@ jobs:
       # Lint and dependency CVEs are gates, not advice. The audit of 2026-08-30
       # found two vulnerable transitive dependencies that a manual pip-audit
       # surfaced only because someone thought to run one.
+      # `uvx`, not `uv run`: ruff is not a project dependency, and `uv run ruff`
+      # fails with "Failed to spawn: ruff" -- measured locally 2026-09-12. The
+      # step was added on 2026-08-30 and never ran, because nothing has been
+      # pushed since May.
       - name: Lint
-        run: uv run --python ${{ matrix.python-version }} ruff check .
+        run: uvx ruff check .
 
+      # Audits THIS project's environment. `uvx pip-audit` on its own audits the
+      # throwaway environment pip-audit was installed into, so it reports "no
+      # known vulnerabilities" about a set of packages this server never loads
+      # -- a gate that cannot go red. The `|| uvx pip-audit` fallback made it
+      # unfailable on top of that. Measured 2026-09-12: the previous command was
+      # green while auditing nothing of ours. pip needs installing alongside
+      # because uv environments do not ship it; the package itself is skipped
+      # because an editable local distribution is not on PyPI to look up.
       - name: Audit dependencies for known vulnerabilities
-        run: uvx pip-audit --strict --ignore-vuln PYSEC-0000-NONE || uvx pip-audit
+        run: uv run --python ${{ matrix.python-version }} --with pip --with pip-audit pip-audit --skip-editable
 
       - name: Run pytest (hermetic only, no network)
         run: uv run --python ${{ matrix.python-version }} pytest -v
