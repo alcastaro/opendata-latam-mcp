@@ -58,7 +58,12 @@ def test_every_tool_returns_an_object_never_a_bare_list():
 
     for name in TOOL_NAMES:
         ann = inspect.signature(_tool(name)).return_annotation
-        assert ann in (dict, "dict"), f"{name} returns {ann!r}, must be dict"
+        # `dict[str, Any]`, not bare `dict`: only the parametrized form makes SDK
+        # v2 emit an output schema — and with it structured content on the wire.
+        # Measured 2026-09-12: bare `dict` gave fifteen tools with no schema.
+        assert str(ann).replace("typing.", "") == "dict[str, Any]", (
+            f"{name} returns {ann!r}, must be dict[str, Any]"
+        )
 
 
 def test_no_tool_advertises_an_array_output_schema(tools):
@@ -219,3 +224,62 @@ async def test_cross_country_search_reports_a_dead_portal_without_failing(httpx_
     out = await _tool("cross_country_search")(query="agua", countries=["PA", "EC"])
     assert out["summary"]["EC"]["portal_error"], "a dead portal must be named"
     assert out["summary"]["PA"]["portal_error"] is None
+
+
+# ─── Failures found on 2026-09-12, each with the hint it now gets ─────────────
+
+
+async def test_a_dns_failure_is_a_network_error_not_an_unexpected_one(monkeypatch):
+    """The SSRF guard resolves every host before httpx does, and it raises its
+    own exception type from inside the request hook. Measured on a machine with
+    no DNS: that exception escaped the adapter as itself, so the envelope filed
+    "cannot resolve host" under "Unexpected failure" and told the model to check
+    its arguments — for a connectivity fault. The adapter's contract of raising
+    RuntimeError, which the fan-out and the live suite depend on, stopped holding
+    at the same time."""
+    from opendata_latam_mcp import netguard
+    from opendata_latam_mcp.adapters import get_adapter
+
+    def _no_dns(host):
+        raise netguard.NetGuardError(f"cannot resolve host {host!r}: nodename not known")
+
+    monkeypatch.setattr(netguard, "_resolve", _no_dns)
+    await get_adapter("PA").close()  # a fresh client, so the hook runs
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await get_adapter("PA").search_datasets(query="agua")
+    assert "network error" in str(excinfo.value)
+
+    out = await _tool("search_datasets")(country="PA", query="agua")
+    assert "cannot resolve host" in out["error"]
+    assert "unreachable" in out["hint"]
+    assert "Unexpected" not in out["hint"]
+
+
+async def test_a_web_page_where_json_was_expected_names_the_portal_not_the_parser(httpx_mock):
+    """Panama's `status_show` answers HTTP 200 with an HTML page. Before this,
+    the model received 'Expecting value: line 1 column 1 (char 0)' — a JSON
+    parser's complaint, with nothing about what the portal did."""
+    httpx_mock.add_response(status_code=200, text="<html><body>Access denied</body></html>")
+    out = await _tool("get_dataset")(country="PA", id="whatever")
+    assert "non-JSON body" in out["error"]
+    assert "Access denied" in out["error"]
+    assert "web page" in out["hint"]
+    assert "Expecting value" not in out["error"]
+
+
+async def test_cross_country_search_normalizes_and_deduplicates_codes(httpx_mock):
+    """Measured with ["mx", "MX"]: Mexico was queried twice, answered under two
+    keys, and the summary called the lowercase one "mx" because the COUNTRIES
+    lookup is case-sensitive. An unknown code gets its own error entry rather
+    than sinking the fan-out — the same treatment a dead portal gets."""
+    httpx_mock.add_response(json={"success": True, "result": {"count": 1, "results": []}})
+    out = await _tool("cross_country_search")(query="agua", countries=["mx", "MX", "Mexico", "XX"])
+    assert set(out["by_country"]) == {"MX", "XX"}
+    assert out["countries_queried"] == ["MX"]
+    assert out["summary"]["MX"]["country_name"] == "México"
+    assert out["summary"]["MX"]["total_hits"] == 1
+    assert out["by_country"]["XX"]["error"].startswith("Unknown country")
+    assert out["summary"]["XX"]["portal_error"]
+    # One request for one country, not three.
+    assert len(httpx_mock.get_requests()) == 1

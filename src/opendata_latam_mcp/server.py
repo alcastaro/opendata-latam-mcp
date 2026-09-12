@@ -6,17 +6,17 @@ selected portal in parallel — the one thing a single-country MCP cannot do.
 
 **What this server does, and does not, do.** Fourteen of the fifteen tools are
 CATALOGUE-level: they search datasets, return metadata, and list organizations,
-groups and tags. **None of them reads a row of data.** There is no DataStore
-query, no file download, no CSV/XLSX parsing here. Reading rows is what the
-dedicated country packages do (`dominican-open-data-mcp`,
-`colombian-open-data-mcp`), and it will arrive here through them rather than
-being reimplemented. Saying so in the tool descriptions is deliberate: a server
-that claims a depth it does not have costs the model a turn to discover.
+groups and tags. The fifteenth, `read_resource_rows`, returns actual rows
+through the CKAN DataStore where a portal has built one. There is still no file
+download and no CSV/XLSX parsing here: reading files is what the dedicated
+country packages do (`dominican-open-data-mcp`, `colombian-open-data-mcp`), and
+it will arrive here through them rather than being reimplemented. Saying so in
+the tool descriptions is deliberate: a server that claims a depth it does not
+have costs the model a turn to discover.
 
-The exception is `read_resource_rows`, which returns actual rows through the
-CKAN DataStore where a portal has built one. It does not aggregate: the CKAN
-action that would run a GROUP BY server-side answers on Uruguay alone out of the
-six portals measured, so aggregation belongs in a local layer above these rows.
+`read_resource_rows` does not aggregate: the CKAN action that would run a GROUP
+BY server-side answers on Uruguay alone out of the six portals measured, so
+aggregation belongs in a local layer above these rows.
 
 Portals, measured 2026-08-30 by exercising the registered tools:
 AR 1,273 · CL 3,188 · DO 1,062 · MX 1,736 · PA 5,667 · UY 2,702 — 15,628 live.
@@ -31,14 +31,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import __version__, adapters
-from .countries import COUNTRIES, all_codes
+from .countries import COUNTRIES, all_codes, normalize_country_code
 from .errors import build_error, tool_envelope
 
 logging.basicConfig(
@@ -70,7 +70,7 @@ def _ro(title: str) -> ToolAnnotations:
 
 @mcp.tool(annotations=_ro("Países soportados"))
 @tool_envelope
-async def list_supported_countries() -> dict:
+async def list_supported_countries() -> dict[str, Any]:
     """Return the LatAm open-data portals this MCP currently supports.
 
     Each entry carries the ISO country code, portal name, URL, platform and a
@@ -90,21 +90,39 @@ async def list_supported_countries() -> dict:
 # ─── Per-country tools ────────────────────────────────────────────────────────
 
 
-CountryArg = Annotated[
-    str,
-    Field(
-        description=(
-            "ISO 3166-1 alpha-2 country code. Supported: "
-            "AR (Argentina), CL (Chile), DO (Dominican Republic), "
-            "MX (Mexico), PA (Panama), UY (Uruguay). "
-            "EC (Ecuador) is configured but its portal has answered HTTP 403 to "
-            "every request since 2026-08-30 — expect an error, not results. "
-            "Every tool here reads CATALOGUE metadata: it finds datasets and "
-            "describes them, it does not read their rows. "
-            "Use list_supported_countries to verify before passing other codes."
-        )
-    ),
-]
+def _country_arg_description() -> str:
+    """Built from the registry so it cannot go stale.
+
+    The hand-written version had to be edited by hand every time a country was
+    added or a portal changed status, and its twin in the README omitted Panama
+    for two weeks after Panama was added — the same lie-by-staleness this
+    project measures other people's portals for. Every declared-unreachable
+    portal is named with its note, so the model knows before its first call.
+    """
+    portals = adapters.list_supported()
+    ok = [
+        f"{p['country']} ({COUNTRIES[p['country']].name_en})"
+        for p in portals
+        if p["status"] == "ok"
+    ]
+    down = [
+        f"{p['country']} ({COUNTRIES[p['country']].name_en}) is configured but "
+        f"{p.get('status_note') or 'currently unreachable'}"
+        for p in portals
+        if p["status"] != "ok"
+    ]
+    text = "ISO 3166-1 alpha-2 country code. Supported: " + ", ".join(ok) + ". "
+    if down:
+        text += " ".join(down) + " "
+    text += (
+        "Every tool here reads CATALOGUE metadata — it finds datasets and describes "
+        "them; only read_resource_rows returns rows. "
+        "Use list_supported_countries to verify before passing other codes."
+    )
+    return text
+
+
+CountryArg = Annotated[str, Field(description=_country_arg_description())]
 
 
 @mcp.tool(annotations=_ro("Buscar datasets"))
@@ -128,7 +146,7 @@ async def search_datasets(
     group: Annotated[str | None, Field(description="Thematic group slug.")] = None,
     limit: Annotated[int, Field(description="Results (1-50)", ge=1, le=50)] = 10,
     offset: Annotated[int, Field(description="Offset for pagination.", ge=0)] = 0,
-) -> dict:
+) -> dict[str, Any]:
     """Search datasets in a specific LatAm country's open-data portal.
 
     Returns summary metadata (title, organization, formats, URL) for matching
@@ -150,7 +168,7 @@ async def search_datasets(
 async def get_dataset(
     country: CountryArg,
     id: Annotated[str, Field(description="Dataset UUID or slug.")],
-) -> dict:
+) -> dict[str, Any]:
     """Return full metadata for a dataset in a specific country's portal.
 
     Includes title, description, license, author, and full resource list with
@@ -165,7 +183,7 @@ async def get_dataset(
 async def list_recent_datasets(
     country: CountryArg,
     limit: Annotated[int, Field(description="Count (1-30)", ge=1, le=30)] = 10,
-) -> dict:
+) -> dict[str, Any]:
     """Most recently modified datasets in a country's portal. Hydrated, not
     raw activity events."""
     adapter = adapters.get_adapter(country)
@@ -177,7 +195,7 @@ async def list_recent_datasets(
 async def get_resource(
     country: CountryArg,
     id: Annotated[str, Field(description="Resource UUID.")],
-) -> dict:
+) -> dict[str, Any]:
     """Metadata for a single resource (file) — download URL, format, size, date."""
     adapter = adapters.get_adapter(country)
     return await adapter.get_resource(id)
@@ -189,7 +207,7 @@ async def search_resources(
     country: CountryArg,
     query: Annotated[str, Field(description="Resource name (full or partial).")],
     limit: Annotated[int, Field(description="Results (1-50)", ge=1, le=50)] = 10,
-) -> dict:
+) -> dict[str, Any]:
     """Search resources (files) by name within a country's portal."""
     adapter = adapters.get_adapter(country)
     return await adapter.search_resources(query=query, limit=limit)
@@ -200,7 +218,7 @@ async def search_resources(
 async def list_organizations(
     country: CountryArg,
     limit: Annotated[int, Field(description="Max (1-200)", ge=1, le=200)] = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Government institutions publishing data in a country's portal, with
     per-institution dataset counts."""
     adapter = adapters.get_adapter(country)
@@ -218,7 +236,7 @@ async def list_organizations(
 async def get_organization(
     country: CountryArg,
     id: Annotated[str, Field(description="Organization slug or UUID.")],
-) -> dict:
+) -> dict[str, Any]:
     """Detailed info on a single publishing institution in a country."""
     adapter = adapters.get_adapter(country)
     return await adapter.get_organization(id)
@@ -226,7 +244,7 @@ async def get_organization(
 
 @mcp.tool(annotations=_ro("Categorías temáticas"))
 @tool_envelope
-async def list_groups(country: CountryArg) -> dict:
+async def list_groups(country: CountryArg) -> dict[str, Any]:
     """Thematic categories (economy, health, education, etc.) in a country's portal."""
     adapter = adapters.get_adapter(country)
     groups = await adapter.list_groups()
@@ -244,7 +262,7 @@ async def list_tags(
     country: CountryArg,
     query: Annotated[str | None, Field(description="Optional prefix.")] = None,
     limit: Annotated[int, Field(description="Max (1-100)", ge=1, le=100)] = 20,
-) -> dict:
+) -> dict[str, Any]:
     """List tags available in a country's portal, optionally prefix-filtered."""
     adapter = adapters.get_adapter(country)
     tags = await adapter.list_tags(query=query, limit=limit)
@@ -266,7 +284,7 @@ async def autocomplete(
     ],
     query: Annotated[str, Field(description="Partial text to complete.")],
     limit: Annotated[int, Field(description="Suggestions (1-30)", ge=1, le=30)] = 10,
-) -> dict:
+) -> dict[str, Any]:
     """Autocomplete dataset / organization / group / tag names within a country.
 
     `kind` is a closed set enforced by the schema, so an invalid value is
@@ -286,7 +304,7 @@ async def autocomplete(
 
 @mcp.tool(annotations=_ro("Estadísticas del portal"))
 @tool_envelope
-async def get_site_stats(country: CountryArg) -> dict:
+async def get_site_stats(country: CountryArg) -> dict[str, Any]:
     """Portal-wide stats for one country: datasets, organizations, groups, tags."""
     adapter = adapters.get_adapter(country)
     return await adapter.get_site_stats()
@@ -314,7 +332,7 @@ async def read_resource_rows(
         str | None,
         Field(description="Free-text filter applied across the resource's columns."),
     ] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Read the actual rows of one resource, through the portal's CKAN DataStore.
 
     This is the only tool here that returns data rather than metadata, and it
@@ -356,17 +374,29 @@ async def cross_country_search(
         int,
         Field(description="Max results per portal (1-20)", ge=1, le=20),
     ] = 5,
-) -> dict:
+) -> dict[str, Any]:
     """Search the same term across every LatAm portal in parallel. THE unique
     feature of this MCP — impossible with single-country MCPs.
 
     Returns a dict keyed by country code with each portal's matches and a
     rolled-up `summary` showing total hits per country.
     """
-    if countries is None:
-        target_codes = all_codes()
-    else:
-        target_codes = countries
+    # Normalize and de-duplicate at the entry, not per country. Measured
+    # 2026-09-12 with ["mx", "MX"]: Mexico was queried twice, the results came
+    # back under two keys, and the summary named the lowercase one "mx" because
+    # the COUNTRIES lookup below is case-sensitive. An unknown code is not a
+    # reason to fail the whole fan-out: it gets its own error entry, the same
+    # way a dead portal does.
+    target_codes: list[str] = []
+    rejected: dict[str, dict] = {}
+    for raw in all_codes() if countries is None else countries:
+        try:
+            code = normalize_country_code(raw)
+        except ValueError as e:
+            rejected[str(raw)] = build_error(e, tool="cross_country_search", country=str(raw))
+            continue
+        if code not in target_codes:
+            target_codes.append(code)
 
     async def _one(code: str):
         try:
@@ -382,6 +412,7 @@ async def cross_country_search(
     results = await asyncio.gather(*[_one(c) for c in target_codes])
 
     by_country: dict[str, dict] = dict(results)
+    by_country.update(rejected)
     summary = {
         code: {
             "country_name": COUNTRIES[code].name_es if code in COUNTRIES else code,
@@ -406,7 +437,7 @@ async def cross_country_search(
 
 @mcp.tool(annotations=_ro("Estadísticas multi-país"))
 @tool_envelope
-async def cross_country_stats() -> dict:
+async def cross_country_stats() -> dict[str, Any]:
     """Run get_site_stats against every supported country in parallel. Quick
     health check + comparative portal sizes."""
 

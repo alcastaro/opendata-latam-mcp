@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 import httpx
 
 from ... import __version__
-from ...netguard import guard_request_hook
+from ...netguard import NetGuardError, guard_request_hook
 
 # Some LatAm gov portals (e.g. datos.gob.mx) ship an incomplete TLS cert chain.
 # curl works because it reads the macOS / Windows / Linux system trust store.
@@ -171,12 +171,40 @@ class CkanAdapter:
             raise RuntimeError(
                 f"[{self.COUNTRY_CODE}] network error in {action}: {e}"
             ) from e
+        except NetGuardError as e:
+            # The guard raises from inside the request hook, and it is not an
+            # httpx error, so without this branch it escaped as itself. Two
+            # things went wrong when it did — measured 2026-09-12 on a machine
+            # with no DNS: the tool envelope classified "cannot resolve host"
+            # as "Unexpected failure", sending the model to check its
+            # arguments for what is a connectivity fault; and this adapter's
+            # contract of raising RuntimeError, which the live tests and the
+            # fan-out both rely on, silently stopped holding. A refused
+            # non-public address is a network error too, and the message
+            # keeps saying which.
+            raise RuntimeError(
+                f"[{self.COUNTRY_CODE}] network error in {action}: {e}"
+            ) from e
         if r.status_code >= 400:
             raise RuntimeError(
                 f"[{self.COUNTRY_CODE}] {self.PORTAL_NAME} {action} "
                 f"HTTP {r.status_code} {r.reason_phrase}"
             )
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError as e:
+            # A 2xx with a body that is not JSON is a WAF page, a maintenance
+            # page or a misrouted HTML error — Panama's `status_show` does
+            # exactly this. Left alone, the model received "Expecting value:
+            # line 1 column 1 (char 0)", which names a JSON parser and nothing
+            # about the portal. Say what the portal did, so the hint can say
+            # what to do about it.
+            snippet = r.text[:80].replace("\n", " ").strip()
+            raise RuntimeError(
+                f"[{self.COUNTRY_CODE}] {self.PORTAL_NAME} {action} answered "
+                f"HTTP {r.status_code} with a non-JSON body (an HTML or WAF page, "
+                f"not the API): {snippet!r}"
+            ) from e
         if not data.get("success"):
             err = data.get("error", {})
             msg = err.get("message") if isinstance(err, dict) else str(err)

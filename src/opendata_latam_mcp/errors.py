@@ -101,6 +101,12 @@ def _hint_for(message: str) -> str:
             "The portal accepted the request and rejected its contents. Check the "
             "argument values; the portal's own message is in `error`."
         )
+    if "non-json body" in low:
+        return (
+            "The portal answered with a web page instead of the API — a WAF, "
+            "maintenance or error page. The request was well-formed; retrying it "
+            "will not help. Try another country, or come back later."
+        )
     if "network error" in low or "connect" in low:
         return (
             "The portal was unreachable — a DNS or connectivity failure on its "
