@@ -283,3 +283,14 @@ async def test_cross_country_search_normalizes_and_deduplicates_codes(httpx_mock
     assert out["summary"]["XX"]["portal_error"]
     # One request for one country, not three.
     assert len(httpx_mock.get_requests()) == 1
+
+
+async def test_a_web_page_that_says_404_in_its_body_is_still_a_web_page(httpx_mock):
+    """The non-JSON message carries the page's first bytes, so a maintenance page
+    whose body reads "404 Not Found" would match the identifier branch if that
+    ran first — and tell the model its id was wrong when the portal was down."""
+    httpx_mock.add_response(status_code=200, text="<h1>404 Not Found</h1><p>Request timeout</p>")
+    out = await _tool("get_dataset")(country="PA", id="whatever")
+    assert "non-JSON body" in out["error"]
+    assert "web page" in out["hint"]
+    assert "identifier" not in out["hint"]

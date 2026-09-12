@@ -71,6 +71,17 @@ def _hint_for(message: str) -> str:
         )
     if "kind must be one of" in low:
         return "Pass kind as one of: dataset, organization, group, tag."
+    # Before any status-code branch, on purpose. This message embeds the first
+    # bytes of the page the portal sent, and a maintenance page that says "404
+    # Not Found" or "Request timeout" in its body would otherwise be claimed by
+    # the identifier or timeout branch and send the model to fix an argument
+    # that was fine. The marker is ours, so it is the most specific thing here.
+    if "non-json body" in low:
+        return (
+            "The portal answered with a web page instead of the API — a WAF, "
+            "maintenance or error page. The request was well-formed; retrying it "
+            "will not help. Try another country, or come back later."
+        )
     if "http 403" in low or "forbidden" in low:
         return (
             "The portal is refusing programmatic access — this is the portal's "
@@ -100,12 +111,6 @@ def _hint_for(message: str) -> str:
         return (
             "The portal accepted the request and rejected its contents. Check the "
             "argument values; the portal's own message is in `error`."
-        )
-    if "non-json body" in low:
-        return (
-            "The portal answered with a web page instead of the API — a WAF, "
-            "maintenance or error page. The request was well-formed; retrying it "
-            "will not help. Try another country, or come back later."
         )
     if "network error" in low or "connect" in low:
         return (
