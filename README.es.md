@@ -10,7 +10,7 @@
 
 Una instalación, seis portales vivos, **15.628 datasets públicos** de Argentina, Chile, México, Panamá, República Dominicana y Uruguay — buscables y consultables cruzando países desde cualquier asistente de IA compatible con MCP (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
 
-> **Léase esto antes que nada:** todas las herramientas son de **nivel catálogo**. Encuentran datasets y los describen; **no leen sus filas.** Ver [Alcance: qué hace y qué no hace](#alcance-qué-hace-y-qué-no-hace).
+> **Léase esto antes que nada:** catorce de las quince herramientas son de **nivel catálogo** — encuentran datasets y los describen. Solo `read_resource_rows` devuelve filas, y solo donde el portal construyó una tabla DataStore de CKAN para ese recurso (medido: 64,5% de los datasets muestreados en cinco portales). Sin descarga de archivos, sin parseo. Ver [Alcance: qué hace y qué no hace](#alcance-qué-hace-y-qué-no-hace).
 
 ---
 
@@ -155,7 +155,7 @@ efecto secundario de no haber construido todavía una caché.
 
 ### Por país (requiere código ISO 3166-1 alpha-2)
 
-Cada tool acepta un parámetro `country`: `AR`, `CL`, `DO`, `EC`, `MX`, `UY`.
+Cada tool acepta un parámetro `country`: `AR`, `CL`, `DO`, `EC`, `MX`, `PA`, `UY` (`EC` está configurado pero no responde — ver arriba). La lista que ve el modelo se genera desde el registro, así que no puede desviarse de esta.
 
 | Tool | Qué hace |
 |---|---|
@@ -170,6 +170,7 @@ Cada tool acepta un parámetro `country`: `AR`, `CL`, `DO`, `EC`, `MX`, `UY`.
 | `list_tags` | Tags disponibles, opcionalmente filtrados por prefijo. |
 | `autocomplete` | Resuelve nombres parciales de datasets, organizaciones, grupos o tags. |
 | `get_site_stats` | Conteos portal-wide (datasets, organizaciones, grupos, tags). |
+| `read_resource_rows` | Las filas de un recurso, a través del DataStore de CKAN del portal — paginadas, filtrables por texto libre, celdas truncadas. Donde el portal no construyó tabla devuelve un error que lo dice y qué intentar en su lugar. |
 
 ### Cross-country (el value-add único)
 
@@ -184,7 +185,7 @@ Cada tool acepta un parámetro `country`: `AR`, `CL`, `DO`, `EC`, `MX`, `UY`.
 
 ### Opción A — Vía `uvx` desde PyPI
 
-Una vez que v0.1.0 esté publicado en PyPI:
+Una vez que el paquete esté publicado en PyPI (todavía no — hasta entonces el repositorio es la fuente de verdad):
 
 ```bash
 uvx --from opendata-latam-mcp opendata-latam-mcp
@@ -283,7 +284,10 @@ Editá `~/.gemini/settings.json`:
 
 ```
 src/opendata_latam_mcp/
-├── server.py              Entry FastMCP; tools registrados acá
+├── server.py              Entry MCPServer (SDK v2); las 15 tools registradas acá
+├── errors.py              El sobre {"error", "hint"} que devuelve cada tool
+├── netguard.py            Guardia SSRF en cada salto (copia interina del módulo compartido)
+├── sweep.py               Arnés de cobertura — ninguna cifra sale sin él
 ├── countries.py           ISO 3166-1 alpha-2 → metadata país
 └── adapters/
     ├── base.py            PortalAdapter Protocol (el contrato)
@@ -295,8 +299,9 @@ src/opendata_latam_mcp/
     │   ├── dominican_republic.py
     │   ├── ecuador.py
     │   ├── mexico.py
+    │   ├── panama.py
     │   └── uruguay.py
-    └── socrata/           (v0.2 — Colombia)
+    └── socrata/           (v0.3 — Colombia, importado)
 ```
 
 ### Decisiones de diseño
@@ -326,25 +331,27 @@ src/opendata_latam_mcp/
 - **Cross-country es `asyncio.gather`.** Fan-out en paralelo contra N portales, devuelve dict por país + summary. Latencia sub-3-segundos contra todos los portales. Un portal que falla devuelve su error dentro del resultado; no tumba a los demás.
 - **System trust store para SSL.** Algunos portales LatAm (notablemente `datos.gob.mx`) shipean chains TLS incompletos que `certifi` no puede verificar. `truststore` inyecta el OS trust store, que `curl` ya usa, así httpx los acepta.
 - **Truncado defensivo.** Descripciones largas truncadas a 300 chars en listados. Dumps cross-country con 6 países × 10 datasets × descripciones multi-KB volarían context windows sin esto.
-- **FastMCP idiomático.** Args tipados con Pydantic; sin schema manual. Cada tool es una función decorada.
+- **MCP SDK v2 idiomático (`MCPServer`).** Args tipados con Pydantic y un esquema de salida de objeto en cada tool; sin schema manual. Cada tool es una función decorada, envuelta en el sobre de errores.
 - **Logging solo stderr.** Requerido por spec MCP para servers stdio (stdout es el protocol stream).
 
 ### Stack
 
-- [`mcp`](https://pypi.org/project/mcp/) (FastMCP) · [`httpx`](https://www.python-httpx.org/) · [`truststore`](https://pypi.org/project/truststore/) · [`duckdb`](https://duckdb.org/) (para layer analytics planeada v0.5) · [`openpyxl`](https://openpyxl.readthedocs.io/) · [`chardet`](https://chardet.readthedocs.io/) · [`odfpy`](https://github.com/eea/odfpy).
+- [`mcp`](https://pypi.org/project/mcp/) (SDK v2, `>=2.1,<3`) · [`httpx`](https://www.python-httpx.org/) · [`truststore`](https://pypi.org/project/truststore/). Tres dependencias de runtime, a propósito: el stack de parseo de archivos y DuckDB llega con los paquetes de país importados en v0.5, no antes.
 
 ---
 
 ## Roadmap
 
-- **v0.1** — 7 países CKAN (AR, CL, DO, EC, MX, PA, UY) · cross-country search + stats.
-- **v0.2** — Colombia a través del paquete `colombian-open-data-mcp`: 5 portales en
+- **v0.1** (publicada 2026-05) — 6 países CKAN · cross-country search + stats.
+- **v0.2** (esta versión) — Panamá · MCP SDK v2 · lectura de filas a través del DataStore
+  de CKAN, medida y no supuesta (tabla arriba) · un `{"error", "hint"}` accionable desde
+  cada herramienta en vez de un error de protocolo opaco · guardia SSRF en cada salto de
+  redirección.
+- **v0.3** — Colombia a través del paquete `colombian-open-data-mcp`: 5 portales en
   2 plataformas (Socrata a nivel nacional, CKAN para Bogotá, Cali, Valle del Cauca y
   Cartagena). Importado como biblioteca, no copiado, para que un arreglo en el código de
-  seguridad compartido llegue a todos los servidores que lo usan.
-- **v0.3** — Leer filas, empezando por el DataStore de CKAN. Es una capacidad de la
-  familia CKAN y no de un país concreto, así que aterriza en `adapters/ckan/base.py` y
-  levanta a Panamá, Chile, México y Uruguay de una sola vez.
+  seguridad compartido llegue a todos los servidores que lo usan. Los reintentos llegan
+  por la misma vía.
 - **v0.4** — Perú y Paraguay vía un adaptador DKAN. **Perú NO está «protegido por CloudWAF»** —
   esa afirmación anterior era falsa y la medición del 30-ago-2026 la desmintió. Perú corre
   DKAN sobre Drupal 7 y sirve un API de acciones de CKAN *parcial*: funcionan
@@ -355,14 +362,19 @@ src/opendata_latam_mcp/
 - **v0.4+** — Brasil (`dados.gov.br`, token Bearer por registro de desarrollador).
   Bolivia y Guatemala responden HTTP 403 a todo; **este proyecto no suplanta un navegador
   para sortear un WAF**, así que quedan sin soporte salvo que se abran.
-- **v0.5** — Portar la capa analytics de `dominican-open-data-mcp` (cache DuckDB, `filter_resource`, `aggregate_resource`, `query_resource`) así el mismo escape hatch SQL funciona contra cualquier recurso de portal cacheado.
+- **v0.5** — Agregación sobre recursos completos, calculada localmente en DuckDB con el motor
+  importado de `dominican-open-data-mcp`. Local porque no hay otra: `datastore_search_sql`
+  responde solo en Uruguay, así que ningún portal de aquí puede correr un `GROUP BY` por
+  nosotros. Sigue sin caché en disco — las filas se retienen para la llamada y se descartan.
 - **v0.6** — Analytics cross-country: `compare_indicators`, `find_equivalent_datasets`, alineación de series temporales entre países.
 
 Ver [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/main/Roadmap.md) en el repo RD MCP para el inventario completo de portales LatAm.
 
 ## Limitaciones conocidas
 
-- Solo metadatos — ver la sección de alcance más arriba.
+- Las filas llegan solo por el DataStore de CKAN, que cubre una fracción de cada catálogo
+  (64,5% de los datasets muestreados en cinco portales; ninguno en República Dominicana).
+  Sin descarga ni parseo de archivos todavía — ver la sección de alcance más arriba.
 - Ecuador no responde; Colombia, Brasil, Perú, Paraguay y Bolivia aún no soportados.
 - Queries cross-country son tan lentas como el portal más lento.
 - La calidad de datos de cada portal es la que entrega el gobierno publicador; este MCP no normaliza schemas entre países (planeado para v0.6).

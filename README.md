@@ -10,7 +10,7 @@
 
 One install, six live portals, **15,628 public datasets** from Argentina, Chile, Dominican Republic, Mexico, Panama, and Uruguay — searchable and cross-country queryable from any MCP-compatible AI assistant (Claude Desktop, Claude Code, Cursor, Gemini CLI, ChatGPT Desktop).
 
-> **Read this before anything else:** every tool here is **catalogue-level**. It finds datasets and describes them; **it does not read their rows.** See [Scope: what this does and does not do](#scope-what-this-does-and-does-not-do).
+> **Read this before anything else:** fourteen of the fifteen tools are **catalogue-level** — they find datasets and describe them. Only `read_resource_rows` returns rows, and only where the portal has built a CKAN DataStore table for that resource (measured: 64.5% of sampled datasets across five portals). No file download, no parsing. See [Scope: what this does and does not do](#scope-what-this-does-and-does-not-do).
 
 ---
 
@@ -154,7 +154,7 @@ side effect of not having built a cache yet.
 
 ### Per-country (ISO 3166-1 alpha-2 code required)
 
-Every tool below accepts a `country` parameter: `AR`, `CL`, `DO`, `EC`, `MX`, `UY`.
+Every tool below accepts a `country` parameter: `AR`, `CL`, `DO`, `EC`, `MX`, `PA`, `UY` (`EC` is configured but unreachable — see above). The list a model actually sees is generated from the registry, so it cannot drift from this one.
 
 | Tool | What it does |
 |---|---|
@@ -169,6 +169,7 @@ Every tool below accepts a `country` parameter: `AR`, `CL`, `DO`, `EC`, `MX`, `U
 | `list_tags` | Tags available, optionally prefix-filtered. |
 | `autocomplete` | Resolve partial names for datasets, organizations, groups, or tags. |
 | `get_site_stats` | Portal-wide counts (datasets, organizations, groups, tags). |
+| `read_resource_rows` | The rows of one resource, through the portal's CKAN DataStore — paginated, free-text filterable, cells truncated. Where the portal built no table it returns an error saying so and what to try instead. |
 
 ### Cross-country (the unique value-add)
 
@@ -183,7 +184,7 @@ Every tool below accepts a `country` parameter: `AR`, `CL`, `DO`, `EC`, `MX`, `U
 
 ### Option A — Via `uvx` from PyPI
 
-Once v0.1.0 is published to PyPI:
+Once the package is published to PyPI (not yet — the repository is the source of truth until then):
 
 ```bash
 uvx --from opendata-latam-mcp opendata-latam-mcp
@@ -282,8 +283,11 @@ Edit `~/.gemini/settings.json`:
 
 ```
 src/opendata_latam_mcp/
-├── server.py              FastMCP entry; tools registered here
+├── server.py              MCPServer (SDK v2) entry; the 15 tools registered here
 ├── countries.py           ISO 3166-1 alpha-2 → country metadata
+├── errors.py              The {"error", "hint"} envelope every tool returns
+├── netguard.py            SSRF guard on every hop (interim copy of the shared module)
+├── sweep.py               Coverage harness — no figure ships without it
 └── adapters/
     ├── base.py            PortalAdapter Protocol (the contract)
     ├── registry.py        Country code → adapter singleton
@@ -294,8 +298,9 @@ src/opendata_latam_mcp/
     │   ├── dominican_republic.py
     │   ├── ecuador.py
     │   ├── mexico.py
+    │   ├── panama.py
     │   └── uruguay.py
-    └── socrata/           (v0.2 — Colombia)
+    └── socrata/           (v0.3 — Colombia, imported)
 ```
 
 ### Design decisions
@@ -324,25 +329,26 @@ src/opendata_latam_mcp/
 - **Cross-country is `asyncio.gather`.** Fan-out in parallel against N portals, return a per-country dict + a summary. Sub-3-second latency across all portals. A portal that fails returns its error inside the result; it does not take the others down.
 - **System trust store for SSL.** Some LatAm portals (notably `datos.gob.mx`) ship incomplete TLS cert chains that `certifi` can't verify. `truststore` injects the OS trust store, which `curl` already uses, so httpx accepts them.
 - **Defensive truncation.** Long descriptions truncated to 300 chars in listings. Cross-country dumps with 6 countries × 10 datasets × multi-KB descriptions would blow context windows without this.
-- **Idiomatic FastMCP.** Pydantic-typed args; no manual schema. Every tool is one decorated function.
+- **Idiomatic MCP SDK v2 (`MCPServer`).** Pydantic-typed args and an object output schema on every tool; no manual schema. Every tool is one decorated function, wrapped in the error envelope.
 - **stderr-only logging.** Required by MCP spec for stdio servers (stdout is the protocol stream).
 
 ### Stack
 
-- [`mcp`](https://pypi.org/project/mcp/) (FastMCP) · [`httpx`](https://www.python-httpx.org/) · [`truststore`](https://pypi.org/project/truststore/) · [`duckdb`](https://duckdb.org/) (for the planned v0.5 analytics layer) · [`openpyxl`](https://openpyxl.readthedocs.io/) · [`chardet`](https://chardet.readthedocs.io/) · [`odfpy`](https://github.com/eea/odfpy).
+- [`mcp`](https://pypi.org/project/mcp/) (SDK v2, `>=2.1,<3`) · [`httpx`](https://www.python-httpx.org/) · [`truststore`](https://pypi.org/project/truststore/). Three runtime dependencies, deliberately: the file-parsing and DuckDB stack arrives with the imported country packages in v0.5, not before.
 
 ---
 
 ## Roadmap
 
-- **v0.1** — 7 CKAN countries (AR, CL, DO, EC, MX, PA, UY) · cross-country search + stats.
-- **v0.2** — Colombia through the `colombian-open-data-mcp` package: 5 portals across
+- **v0.1** (shipped 2026-05) — 6 CKAN countries · cross-country search + stats.
+- **v0.2** (this release) — Panama · MCP SDK v2 · reading rows through the CKAN
+  DataStore, measured rather than assumed (table above) · an actionable
+  `{"error", "hint"}` from every tool instead of an opaque protocol error · SSRF
+  guard on every redirect hop.
+- **v0.3** — Colombia through the `colombian-open-data-mcp` package: 5 portals across
   2 platforms (Socrata nationally, CKAN for Bogotá, Cali, Valle del Cauca, Cartagena).
   Imported as a library, not copied, so a fix in the shared security code reaches
-  every server that uses it.
-- **v0.3** — Reading rows, starting with the CKAN DataStore. It is a capability of the
-  CKAN family rather than of any one country, so it lands in `adapters/ckan/base.py`
-  and lifts Panama, Chile, Mexico and Uruguay at once.
+  every server that uses it. Retries arrive the same way.
 - **v0.4** — Peru and Paraguay through a DKAN adapter. **Peru is not "CloudWAF-protected"** —
   that earlier claim was wrong, and measurement on 2026-08-30 disproved it. Peru runs
   DKAN on Drupal 7 and serves a *partial* CKAN action API: `package_list` (4,670
@@ -353,14 +359,19 @@ src/opendata_latam_mcp/
   Bolivia and Guatemala answer HTTP 403 to everything; **this project does not
   impersonate a browser to get past a WAF**, so they stay unsupported unless they
   open up.
-- **v0.5** — Port the analytics layer from `dominican-open-data-mcp` (DuckDB cache, `filter_resource`, `aggregate_resource`, `query_resource`) so the same SQL escape hatch works against every cached portal resource.
+- **v0.5** — Aggregation over whole resources, computed locally in DuckDB with the engine
+  imported from `dominican-open-data-mcp`. Local because it has to be: `datastore_search_sql`
+  answers on Uruguay alone, so no portal here can run a `GROUP BY` for us. Still no cache
+  on disk — rows are held for the call and discarded.
 - **v0.6** — Cross-country analytics: `compare_indicators`, `find_equivalent_datasets`, time-series alignment across countries.
 
 See [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/main/Roadmap.md) in the RD MCP repo for the full LatAm portal inventory.
 
 ## Known limitations
 
-- Metadata only — see the scope section above.
+- Rows come only through the CKAN DataStore, which covers a fraction of every catalogue
+  (64.5% of sampled datasets across five portals; none in the Dominican Republic). No
+  file download or parsing yet — see the scope section above.
 - Ecuador is unreachable; Colombia, Brazil, Peru, Paraguay and Bolivia are not yet supported.
 - Cross-country queries are as slow as the slowest single portal.
 - Each portal's data quality is whatever the publishing government provides; this MCP doesn't normalize schemas across countries (that's planned for v0.6).
