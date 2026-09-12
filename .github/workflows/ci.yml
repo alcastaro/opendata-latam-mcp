@@ -62,16 +62,19 @@ jobs:
       - name: Lint
         run: uvx ruff check .
 
-      # Audits THIS project's environment. `uvx pip-audit` on its own audits the
-      # throwaway environment pip-audit was installed into, so it reports "no
-      # known vulnerabilities" about a set of packages this server never loads
-      # -- a gate that cannot go red. The `|| uvx pip-audit` fallback made it
-      # unfailable on top of that. Measured 2026-09-12: the previous command was
-      # green while auditing nothing of ours. pip needs installing alongside
-      # because uv environments do not ship it; the package itself is skipped
-      # because an editable local distribution is not on PyPI to look up.
+      # Audits the set of packages the LOCKFILE resolves to, exported without the
+      # project itself. `uvx pip-audit` on its own audits the throwaway environment
+      # pip-audit was installed into, so it reported "no known vulnerabilities"
+      # about packages this server never loads -- a gate that cannot go red -- and
+      # the `|| uvx pip-audit` fallback made it unfailable on top of that.
+      # Measured 2026-09-12. `--disable-pip` keeps pip-audit from building a
+      # virtualenv of its own, which is what made the requirements route crash on
+      # a developer machine; `--no-deps` is correct because the export is already
+      # fully resolved. Same command as the sibling Colombian repo, on purpose.
       - name: Audit dependencies for known vulnerabilities
-        run: uv run --python ${{ matrix.python-version }} --with pip --with pip-audit pip-audit --skip-editable
+        run: |
+          uv export --no-dev --no-hashes --no-emit-project -o requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt --no-deps --disable-pip
 
       - name: Run pytest (hermetic only, no network)
         run: uv run --python ${{ matrix.python-version }} pytest -v
