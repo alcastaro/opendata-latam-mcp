@@ -49,6 +49,13 @@ def _resolve(host: str) -> list[str]:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror as e:
         raise NetGuardError(f"cannot resolve host {host!r}: {e}") from e
+    except UnicodeError as e:
+        # A label the IDNA codec rejects (empty, or over 63 octets) raises
+        # UnicodeError from inside getaddrinfo, not gaierror. Found by the
+        # Colombian module's independent review on 2026-09-12; measured here
+        # the same day. Unhandled, it escaped the guard as itself, which for a
+        # redirect Location means an opaque failure instead of a refusal.
+        raise NetGuardError(f"cannot resolve host {host!r}: invalid label: {e}") from e
     return sorted({info[4][0] for info in infos})
 
 
@@ -64,7 +71,11 @@ def check_address(addr: str, *, host: str = "") -> None:
         ip = ipaddress.ip_address(addr)
     except ValueError as e:
         raise NetGuardError(f"unparseable address {addr!r} for host {host!r}") from e
-    if not ip.is_global:
+    # `is_global` alone lets multicast through: 224.0.0.1 and ff02::1 are
+    # `is_global=True` on Python 3.11. No public data portal lives at a
+    # multicast address, so nothing legitimate is lost by refusing them. Found
+    # by the Colombian module's independent review, 2026-09-12; measured here.
+    if not ip.is_global or ip.is_multicast or ip.is_reserved:
         raise NetGuardError(
             f"refusing request to non-public address {addr} "
             f"(host {host!r}): loopback, private, link-local, CGNAT and IPv6 "

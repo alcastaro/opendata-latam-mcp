@@ -164,3 +164,29 @@ def test_the_guard_uses_httpx_url_parsing_not_a_regex():
     """
     parsed = httpx.URL("http://evil.example@127.0.0.1/admin")
     assert parsed.host == "127.0.0.1"
+
+
+# ─── Gaps found by the sibling module's independent review, 2026-09-12 ─────────
+
+
+@pytest.mark.parametrize("addr", ["224.0.0.1", "239.255.255.250", "ff02::1", "240.0.0.1"])
+def test_multicast_and_reserved_addresses_are_refused(addr):
+    """`is_global` is True for multicast on Python 3.11, so the single-control
+    design let 224.0.0.1 through. Measured before fixing."""
+    with pytest.raises(netguard.NetGuardError):
+        netguard.check_address(addr)
+
+
+def test_an_invalid_idna_label_fails_closed_as_a_guard_error(monkeypatch):
+    """A 64-octet label makes getaddrinfo raise UnicodeError, not gaierror. It
+    escaped the guard as itself, so a redirect to such a host was an opaque
+    failure instead of a refusal. The real resolver goes back first, as above,
+    and the codec failure is reproduced rather than reached over the network."""
+
+    def idna_boom(_host, *_a, **_k):
+        raise UnicodeError("encoding with 'idna' codec failed (label too long)")
+
+    monkeypatch.setattr(netguard, "_resolve", _REAL_RESOLVE)
+    monkeypatch.setattr(netguard.socket, "getaddrinfo", idna_boom)
+    with pytest.raises(netguard.NetGuardError):
+        assert_public_url("https://" + "a" * 64 + ".example/api")
