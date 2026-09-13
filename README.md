@@ -83,6 +83,37 @@ well as the API. It is kept in the list rather than deleted because one vantage 
 cannot distinguish a portal that closed programmatic access from one that blocks a
 particular address. Tools targeting `EC` return an error, not results.
 
+### Why Colombia is not in the table
+
+It is the question this table invites, because Colombia has the region's richest open-data
+platform and a dedicated MCP server for it already exists. Three reasons, in order of how
+much they cost to resolve:
+
+**Colombia is not one more country, it is another platform.** Every country above runs
+CKAN — the same catalogue software with the same API — so they share a single client and
+adding one costs a five-line file with a URL in it. Colombia nationally runs **Socrata**,
+a different product with its own query language (SoQL), alongside four *municipal* portals
+that do run CKAN. That needs a new adapter family, not a descriptor. The `adapters/socrata/`
+directory exists in this repository and is deliberately empty, waiting for it.
+
+**The decision is to import that work, not to rewrite it.**
+[`colombian-open-data-mcp`](https://github.com/alcastaro/colombian-open-data-mcp) already
+implements Socrata, the three-route row reading and the municipal CKAN portals, measured
+against the live portals. Reimplementing it here would duplicate a few thousand lines and
+buy divergence — which is not hypothetical: the shared SSRF module already exists in three
+copies that drifted apart, and on 2026-09-12 an independent review of the Colombian one
+found two gaps this repository's copy had as well. One implementation, imported by every
+server, is the whole point.
+
+**What blocks the import today is publication, not code.** A package can only be imported
+if it can be installed, and a local-path or git dependency breaks `uvx` installs — which is
+how these servers are installed. `colombian-open-data-mcp` is not on PyPI yet (checked
+2026-09-13). That forces the order: **Colombian package first, then this one.**
+
+Until then, nothing is lost to a user: the Colombian server installs separately and works
+today. What is missing is *unification* — having Colombia inside the same
+`cross_country_search` that sweeps the other portals in parallel. That arrives in v0.3.
+
 **Next:** Colombia (5 portals, 2 platforms, ~11k datasets) via the
 `colombian-open-data-mcp` package · Peru and Paraguay via a DKAN adapter · Brazil
 (Bearer token).
@@ -372,7 +403,7 @@ See [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 - Rows come only through the CKAN DataStore, which covers a fraction of every catalogue
   (64.5% of sampled datasets across five portals; none in the Dominican Republic). No
   file download or parsing yet — see the scope section above.
-- Ecuador is unreachable; Colombia, Brazil, Peru, Paraguay and Bolivia are not yet supported.
+- Ecuador is unreachable. Colombia is served by its own package rather than from here — see [Why Colombia is not in the table](#why-colombia-is-not-in-the-table). Brazil, Peru, Paraguay and Bolivia are not yet supported.
 - Cross-country queries are as slow as the slowest single portal.
 - Each portal's data quality is whatever the publishing government provides; this MCP doesn't normalize schemas across countries (that's planned for v0.6).
 

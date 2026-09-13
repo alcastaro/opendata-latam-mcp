@@ -84,6 +84,39 @@ sitio como en el API. Se mantiene en la lista en vez de borrarlo porque un solo 
 observación no permite distinguir un portal que cerró el acceso programático de uno que
 bloquea una dirección concreta. Las herramientas con `EC` devuelven un error, no resultados.
 
+### Por qué Colombia no está en la tabla
+
+Es la pregunta que esta tabla invita a hacer, porque Colombia tiene la plataforma de datos
+abiertos más rica de la región y ya existe un servidor MCP dedicado a ella. Tres razones,
+ordenadas por lo que cuesta resolverlas:
+
+**Colombia no es un país más, es otra plataforma.** Todos los países de arriba corren
+CKAN — el mismo software de catálogo con el mismo API — así que comparten un único cliente
+y añadir uno cuesta un archivo de cinco líneas con una URL. Colombia a nivel nacional corre
+**Socrata**, un producto distinto con su propio lenguaje de consulta (SoQL), y además tiene
+cuatro portales *municipales* que sí son CKAN. Eso exige una familia de adaptadores nueva,
+no un descriptor. El directorio `adapters/socrata/` existe en este repositorio y está vacío
+a propósito, esperándola.
+
+**La decisión es importar ese trabajo, no reescribirlo.**
+[`colombian-open-data-mcp`](https://github.com/alcastaro/colombian-open-data-mcp) ya
+implementa Socrata, la lectura de filas por tres vías encadenadas y los portales municipales
+CKAN, medido contra los portales vivos. Reimplementarlo aquí duplicaría algunos miles de
+líneas y compraría divergencia — y eso no es hipotético: el módulo compartido de protección
+SSRF ya existe en tres copias que se separaron entre sí, y el 12-sep-2026 una revisión
+independiente de la colombiana encontró dos huecos que la copia de este repositorio también
+tenía. Una sola implementación, importada por cada servidor, es justamente el objetivo.
+
+**Lo que hoy bloquea la importación es la publicación, no el código.** Un paquete solo se
+puede importar si se puede instalar, y una dependencia por ruta local o por git rompe las
+instalaciones con `uvx`, que es como se instalan estos servidores. `colombian-open-data-mcp`
+todavía no está en PyPI (verificado el 13-sep-2026). Eso fuerza el orden: **primero el
+paquete colombiano, después este.**
+
+Mientras tanto el usuario no pierde nada: el servidor colombiano se instala por separado y
+funciona hoy. Lo que falta es la *unificación* — tener a Colombia dentro del mismo
+`cross_country_search` que barre los demás portales en paralelo. Eso llega en v0.3.
+
 **Lo que sigue:** Colombia (5 portales, 2 plataformas, ~11k datasets) vía el paquete
 `colombian-open-data-mcp` · Perú y Paraguay vía un adaptador DKAN · Brasil (token Bearer).
 
@@ -375,7 +408,7 @@ Ver [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 - Las filas llegan solo por el DataStore de CKAN, que cubre una fracción de cada catálogo
   (64,5% de los datasets muestreados en cinco portales; ninguno en República Dominicana).
   Sin descarga ni parseo de archivos todavía — ver la sección de alcance más arriba.
-- Ecuador no responde; Colombia, Brasil, Perú, Paraguay y Bolivia aún no soportados.
+- Ecuador no responde. Colombia se sirve desde su propio paquete y no desde aquí — ver [Por qué Colombia no está en la tabla](#por-qué-colombia-no-está-en-la-tabla). Brasil, Perú, Paraguay y Bolivia aún no soportados.
 - Queries cross-country son tan lentas como el portal más lento.
 - La calidad de datos de cada portal es la que entrega el gobierno publicador; este MCP no normaliza schemas entre países (planeado para v0.6).
 
