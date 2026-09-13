@@ -109,6 +109,7 @@ only-include = [
     "README.md",
     "README.es.md",
     "LICENSE",
+    "SECURITY.md",
     "server.json",
 ]
 
