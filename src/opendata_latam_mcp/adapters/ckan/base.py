@@ -55,7 +55,27 @@ DEFAULT_TIMEOUT = min(max(float(os.getenv("OPENDATA_LATAM_TIMEOUT", "15") or 15)
 # a catalogue dump — must not be able to exhaust this process's memory. Read is
 # capped and the excess refused rather than truncated: a truncated JSON body
 # fails to parse with a message blaming the publisher for a cut we made.
-MAX_RESPONSE_BYTES = int(os.getenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "25")) * 1024 * 1024
+#
+# Parsed the same way as the timeout above, and for the same two reasons, which
+# this constant used to ignore. A non-numeric value raised ValueError at IMPORT
+# time, so the server did not start at all and a stdio client saw a dead process
+# with a traceback on stderr — a typo in an environment variable is not a reason
+# to have no server. And an unbounded value (999999 was accepted, giving a ~1 TB
+# ceiling) silently disables the very protection this constant exists to provide.
+# Measured 2026-09-13.
+def _int_env(name: str, default: int, *, low: int, high: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        return default
+    return min(max(value, low), high)
+
+
+MAX_RESPONSE_MB = _int_env("OPENDATA_LATAM_MAX_RESPONSE_MB", 25, low=1, high=512)
+MAX_RESPONSE_BYTES = MAX_RESPONSE_MB * 1024 * 1024
 
 # Output trimming so a single call never blows the LLM's context window.
 NOTES_TRUNC = 300

@@ -247,3 +247,41 @@ def test_the_timeout_is_configurable_and_bounded(monkeypatch):
     monkeypatch.delenv("OPENDATA_LATAM_TIMEOUT")
     importlib.reload(ckan_base)
     assert ckan_base.DEFAULT_TIMEOUT == 15.0
+
+
+def test_the_response_cap_is_bounded_and_survives_a_typo(monkeypatch):
+    """Its sibling above was bounded and this one was not — measured 2026-09-13.
+
+    Two failures, both from the same missing parse. A non-numeric value raised
+    ValueError at IMPORT time, so the server never started and a stdio client
+    saw a dead process with a traceback; a typo in an environment variable must
+    not cost you the whole server. And an unbounded value was accepted, so
+    999999 gave a ~1 TB ceiling that silently disabled the memory protection
+    this constant exists to provide.
+    """
+    import importlib
+
+    from opendata_latam_mcp.adapters.ckan import base as ckan_base
+
+    monkeypatch.setenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "50")
+    importlib.reload(ckan_base)
+    assert ckan_base.MAX_RESPONSE_MB == 50
+
+    # Garbage falls back to the default rather than killing the process.
+    monkeypatch.setenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "abc")
+    importlib.reload(ckan_base)
+    assert ckan_base.MAX_RESPONSE_MB == 25
+
+    # Clamped at both ends, so neither a huge value nor a zero disables the cap.
+    monkeypatch.setenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "999999")
+    importlib.reload(ckan_base)
+    assert ckan_base.MAX_RESPONSE_MB == 512
+
+    monkeypatch.setenv("OPENDATA_LATAM_MAX_RESPONSE_MB", "0")
+    importlib.reload(ckan_base)
+    assert ckan_base.MAX_RESPONSE_MB == 1
+
+    monkeypatch.delenv("OPENDATA_LATAM_MAX_RESPONSE_MB")
+    importlib.reload(ckan_base)
+    assert ckan_base.MAX_RESPONSE_MB == 25
+    assert ckan_base.MAX_RESPONSE_BYTES == 25 * 1024 * 1024
