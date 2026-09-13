@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege, declared rather than inherited. The repository went public on
+# 2026-09-13, which means anyone can now open a pull request that makes this
+# workflow execute their code. Nothing here writes to the repository, so the
+# token gets read access and nothing else; without this block it inherits
+# whatever the account default happens to be.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Build + tests (Python ${{ matrix.python-version }})
@@ -115,7 +123,8 @@ jobs:
           import tarfile, glob, sys, posixpath
           ALLOWED_TOP = {
               "src", "tests", "README.md", "README.es.md", "LICENSE",
-              "server.json", "pyproject.toml", "PKG-INFO", ".gitignore",
+              "SECURITY.md", "server.json", "pyproject.toml", "PKG-INFO",
+              ".gitignore",
           }
           path = glob.glob("dist/*.tar.gz")[0]
           with tarfile.open(path) as tf:
