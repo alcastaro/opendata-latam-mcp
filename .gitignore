@@ -22,6 +22,7 @@ venv/
 
 # uv
 # (uv.lock IS committed for app projects)
+requirements-audit.txt
 
 # Claude Code local files (NEVER commit)
 CLAUDE.md
@@ -29,4 +30,38 @@ CLAUDE.md
 
 # Working notes for the regional integration (not part of the package)
 internal/
-requirements-audit.txt
+
+# ─── Secrets. Nothing here has ever existed in this repo and nothing should. ──
+# Listed anyway because the release process handles a PyPI token, and the cheapest
+# moment to block a credential is before it is written, not after it is pushed.
+# GitHub secret-scanning push protection is on, but it only knows provider-shaped
+# tokens; a file called .env full of anything is invisible to it.
+.env
+.env.*
+!.env.example
+.pypirc
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
+
+# ─── Local databases — the class of file that already leaked once. ───────────
+# `.code-review-graph/graph.db` (848 KB, 4,226 absolute home paths) reached the
+# sdist on 2026-08-30 because hatchling does not read NESTED .gitignore files and
+# that directory's only protection was its own. Git did respect it, so the file
+# was never tracked -- but relying on a tool to write its own ignore rule is
+# relying on someone else's implementation detail. The rule is by CLASS, not by
+# name, because the next local tool will pick a different directory.
+*.db
+*.sqlite
+*.sqlite3
+
+# ─── Tool caches whose only protection today is a nested .gitignore ──────────
+.code-review-graph/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
