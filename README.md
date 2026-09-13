@@ -213,15 +213,13 @@ Every tool below accepts a `country` parameter: `AR`, `CL`, `DO`, `EC`, `MX`, `P
 
 ## Installation and configuration
 
-### Option A — Via `uvx` from PyPI
+> **This package is not on PyPI yet, and no PyPI name is advertised here on purpose.**
+> Naming an unregistered package in a public README is an invitation for someone else to
+> register it and ship something else under this project's name. Install from the
+> repository below, which is the source of truth. When the package is published, this
+> section will name it and this note will say so.
 
-Once the package is published to PyPI (not yet — the repository is the source of truth until then):
-
-```bash
-uvx --from opendata-latam-mcp opendata-latam-mcp
-```
-
-### Option B — Via `uvx` from GitHub (latest dev)
+### Option A — Via `uvx` from GitHub (recommended)
 
 ```bash
 uvx --from git+https://github.com/alcastaro/opendata-latam-mcp.git opendata-latam-mcp
@@ -229,7 +227,7 @@ uvx --from git+https://github.com/alcastaro/opendata-latam-mcp.git opendata-lata
 
 Prerequisite: [`uv`](https://docs.astral.sh/uv/) installed.
 
-### Option C — Local clone for development
+### Option B — Local clone for development
 
 ```bash
 git clone https://github.com/alcastaro/opendata-latam-mcp.git
@@ -406,6 +404,12 @@ See [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 - Ecuador is unreachable. Colombia is served by its own package rather than from here — see [Why Colombia is not in the table](#why-colombia-is-not-in-the-table). Brazil, Peru, Paraguay and Bolivia are not yet supported.
 - Cross-country queries are as slow as the slowest single portal.
 - Each portal's data quality is whatever the publishing government provides; this MCP doesn't normalize schemas across countries (that's planned for v0.6).
+
+## Security
+
+Found a vulnerability? **Do not open a public issue** — see
+[SECURITY.md](SECURITY.md) for the private reporting channels, what is in scope, and the
+one thing we ask you not to do (run scans against the live government portals).
 
 ## Contributing
 

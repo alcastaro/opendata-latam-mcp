@@ -216,15 +216,13 @@ Cada tool acepta un parámetro `country`: `AR`, `CL`, `DO`, `EC`, `MX`, `PA`, `U
 
 ## Instalación y configuración
 
-### Opción A — Vía `uvx` desde PyPI
+> **Este paquete todavía no está en PyPI, y aquí no se anuncia ningún nombre de PyPI a
+> propósito.** Nombrar un paquete no registrado en un README público es una invitación a que
+> otra persona lo registre y publique otra cosa bajo el nombre de este proyecto. Instalá
+> desde el repositorio, que es la fuente de verdad. Cuando el paquete se publique, esta
+> sección lo nombrará y esta nota lo dirá.
 
-Una vez que el paquete esté publicado en PyPI (todavía no — hasta entonces el repositorio es la fuente de verdad):
-
-```bash
-uvx --from opendata-latam-mcp opendata-latam-mcp
-```
-
-### Opción B — Vía `uvx` desde GitHub (dev más reciente)
+### Opción A — Vía `uvx` desde GitHub (recomendada)
 
 ```bash
 uvx --from git+https://github.com/alcastaro/opendata-latam-mcp.git opendata-latam-mcp
@@ -232,7 +230,7 @@ uvx --from git+https://github.com/alcastaro/opendata-latam-mcp.git opendata-lata
 
 Requisito: [`uv`](https://docs.astral.sh/uv/) instalado.
 
-### Opción C — Clone local para desarrollo
+### Opción B — Clone local para desarrollo
 
 ```bash
 git clone https://github.com/alcastaro/opendata-latam-mcp.git
@@ -411,6 +409,12 @@ Ver [`Roadmap.md`](https://github.com/alcastaro/datos.gob.do-MCP-server/blob/mai
 - Ecuador no responde. Colombia se sirve desde su propio paquete y no desde aquí — ver [Por qué Colombia no está en la tabla](#por-qué-colombia-no-está-en-la-tabla). Brasil, Perú, Paraguay y Bolivia aún no soportados.
 - Queries cross-country son tan lentas como el portal más lento.
 - La calidad de datos de cada portal es la que entrega el gobierno publicador; este MCP no normaliza schemas entre países (planeado para v0.6).
+
+## Seguridad
+
+¿Encontraste una vulnerabilidad? **No abras un issue público** — ver
+[SECURITY.md](SECURITY.md) para los canales privados de reporte, qué está en alcance, y lo
+único que te pedimos que no hagas (correr escaneos contra los portales de gobierno vivos).
 
 ## Contribuciones
 
