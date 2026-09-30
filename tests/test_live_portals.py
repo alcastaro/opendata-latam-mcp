@@ -102,8 +102,21 @@ async def test_live_read_rows_through_the_registered_tool(country):
                 assert out["country"] == country
                 assert out["fields"]
                 return
-            # Anything that is not rows must still be actionable, never opaque.
-            assert "error" in out and "hint" in out
+            # A third outcome, legitimate and measured on 2026-09-30: the portal
+            # built a DataStore table and it holds no rows. Chile published one
+            # with five columns — a data dictionary — and `total_rows: 0`. That is
+            # a well-formed answer, not a failure, so it must carry the success
+            # shape and the walk moves on to the next resource. Before this the
+            # test demanded an error envelope here and went red on a portal that
+            # was answering correctly.
+            if "error" not in out:
+                assert out["route"] == "ckan_datastore"
+                assert out["country"] == country
+                assert out["total_rows"] == 0
+                assert out["rows"] == []
+                continue
+            # Anything else must still be actionable, never opaque.
+            assert out.get("hint"), f"error without a hint: {out['error']}"
 
     pytest.skip(f"{country}: no readable DataStore resource in the first 8 datasets")
 
