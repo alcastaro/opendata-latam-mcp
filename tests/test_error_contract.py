@@ -98,8 +98,8 @@ async def test_portal_failure_returns_a_hint_instead_of_raising(httpx_mock):
     assert "refusing programmatic access" in out["hint"]
 
 
-async def test_network_failure_returns_a_hint_instead_of_raising(httpx_mock):
-    httpx_mock.add_exception(httpx.ConnectError("no route"))
+async def test_network_failure_returns_a_hint_instead_of_raising(httpx_mock, sleeps):
+    httpx_mock.add_exception(httpx.ConnectError("no route"), is_reusable=True)
     out = await _tool("get_dataset")(country="PA", id="whatever")
     assert out["error"]
     assert out["hint"]

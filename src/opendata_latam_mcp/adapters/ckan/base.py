@@ -49,6 +49,11 @@ USER_AGENT = f"opendata-latam-mcp/{__version__} (MCP Server)"
 # and fail three retries at 20s. Configurable now rather than when the
 # aggregation layer turns it into an incident. Bounded so a typo cannot hang a
 # stdio server forever.
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 0.4  # seconds; doubles each attempt
+RETRY_MAX_DELAY = 10.0  # ceiling on a Retry-After the portal asks for
+RETRY_STATUSES = {429, 502, 503, 504}
+
 CKAN_PAGE = 25  # CKAN's ceiling for organization_list / group_list with all_fields
 
 DEFAULT_TIMEOUT = min(max(float(os.getenv("OPENDATA_LATAM_TIMEOUT", "15") or 15), 1.0), 300.0)
@@ -182,10 +187,31 @@ class CkanAdapter:
             r._content = bytes(body)
         return r
 
+    async def _get_retrying(
+        self, client: httpx.AsyncClient, path: str, params: dict[str, Any]
+    ) -> httpx.Response:
+        """_get_capped, retried on transport failures and 429/502/503/504."""
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            delay = RETRY_BASE_DELAY * 2 ** (attempt - 1)
+            try:
+                r = await self._get_capped(client, path, params)
+            except httpx.TransportError:  # includes timeouts and dropped connections
+                if attempt == RETRY_ATTEMPTS:
+                    raise
+            else:
+                if r.status_code not in RETRY_STATUSES or attempt == RETRY_ATTEMPTS:
+                    return r
+                try:  # Retry-After in seconds; the HTTP-date form falls back to backoff
+                    delay = min(float(r.headers["Retry-After"]), RETRY_MAX_DELAY)
+                except (KeyError, ValueError):
+                    pass
+            await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
+
     async def _ckan(self, action: str, params: dict[str, Any] | None = None) -> Any:
         client = await self._get_client()
         try:
-            r = await self._get_capped(client, f"/{action}", self._clean(params or {}))
+            r = await self._get_retrying(client, f"/{action}", self._clean(params or {}))
         except httpx.TimeoutException as e:
             raise RuntimeError(
                 f"[{self.COUNTRY_CODE}] timeout in {action} (>{DEFAULT_TIMEOUT}s)"

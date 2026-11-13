@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import pytest
@@ -36,3 +37,15 @@ def _no_dns_in_hermetic_tests(request, monkeypatch):
     if "live" in request.keywords:
         return
     monkeypatch.setattr(netguard, "_resolve", lambda _host: ["93.184.216.34"])
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record backoff instead of waiting for it."""
+    calls: list[float] = []
+
+    async def fake_sleep(delay):
+        calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    return calls
