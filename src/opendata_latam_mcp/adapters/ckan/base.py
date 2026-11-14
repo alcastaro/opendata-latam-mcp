@@ -49,6 +49,13 @@ USER_AGENT = f"opendata-latam-mcp/{__version__} (MCP Server)"
 # and fail three retries at 20s. Configurable now rather than when the
 # aggregation layer turns it into an incident. Bounded so a typo cannot hang a
 # stdio server forever.
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 0.4  # seconds; doubles each attempt
+RETRY_MAX_DELAY = 10.0  # ceiling on a Retry-After the portal asks for
+RETRY_STATUSES = {429, 502, 503, 504}
+
+CKAN_PAGE = 25  # CKAN's ceiling for organization_list / group_list with all_fields
+
 DEFAULT_TIMEOUT = min(max(float(os.getenv("OPENDATA_LATAM_TIMEOUT", "15") or 15), 1.0), 300.0)
 
 # A portal that answers with a huge body — a broken export, an HTML error page,
@@ -115,6 +122,7 @@ class CkanAdapter:
     MAX_RECENT: ClassVar[int] = 30
     MAX_AUTOCOMPLETE: ClassVar[int] = 30
     MAX_ORGS: ClassVar[int] = 200
+    MAX_GROUPS: ClassVar[int] = 1000
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
@@ -179,10 +187,35 @@ class CkanAdapter:
             r._content = bytes(body)
         return r
 
+    async def _get_retrying(
+        self, client: httpx.AsyncClient, path: str, params: dict[str, Any]
+    ) -> httpx.Response:
+        """_get_capped, retried on dropped connections and 429/502/503/504."""
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            delay = RETRY_BASE_DELAY * 2 ** (attempt - 1)
+            try:
+                r = await self._get_capped(client, path, params)
+            except httpx.TimeoutException:
+                # A portal that used the whole timeout rarely answers the next
+                # try, and three timeouts in a row would hold the caller ~45s.
+                raise
+            except httpx.TransportError:  # dropped and refused connections
+                if attempt == RETRY_ATTEMPTS:
+                    raise
+            else:
+                if r.status_code not in RETRY_STATUSES or attempt == RETRY_ATTEMPTS:
+                    return r
+                try:  # Retry-After in seconds; the HTTP-date form falls back to backoff
+                    delay = min(float(r.headers["Retry-After"]), RETRY_MAX_DELAY)
+                except (KeyError, ValueError):
+                    pass
+            await asyncio.sleep(delay)
+        raise AssertionError("unreachable")
+
     async def _ckan(self, action: str, params: dict[str, Any] | None = None) -> Any:
         client = await self._get_client()
         try:
-            r = await self._get_capped(client, f"/{action}", self._clean(params or {}))
+            r = await self._get_retrying(client, f"/{action}", self._clean(params or {}))
         except httpx.TimeoutException as e:
             raise RuntimeError(
                 f"[{self.COUNTRY_CODE}] timeout in {action} (>{DEFAULT_TIMEOUT}s)"
@@ -525,15 +558,50 @@ class CkanAdapter:
             "resources": [self.format_resource(r) for r in (result.get("results") or [])],
         }
 
+    async def _list_paged(self, action: str, limit: int) -> list[dict[str, Any]]:
+        """Full records for a CKAN list action, paged.
+
+        With all_fields=true CKAN returns at most 25 items per call, silently,
+        so one call looked complete while holding a fraction of the portal.
+        """
+        out: list[dict[str, Any]] = []
+        seen: set[Any] = set()
+        offset = 0
+        while len(out) < limit:
+            page = await self._ckan(
+                action,
+                {
+                    "all_fields": True,
+                    "include_dataset_count": True,
+                    "include_extras": False,
+                    "offset": offset,
+                    "limit": CKAN_PAGE,
+                },
+            )
+            if not isinstance(page, list):
+                break
+            fresh = [x for x in page if x.get("name") not in seen]
+            if not fresh:  # empty page, or a portal that ignores offset
+                break
+            seen.update(x.get("name") for x in fresh)
+            out.extend(fresh)
+            if len(page) < CKAN_PAGE:
+                break
+            offset += CKAN_PAGE
+        return out[:limit]
+
+    async def count_names(self, action: str) -> int | None:
+        """How many items a CKAN list action holds (names only; None if unknown)."""
+        try:
+            result = await self._ckan(action, {})
+        except RuntimeError:
+            return None
+        return len(result) if isinstance(result, list) else None
+
     async def list_organizations(self, limit: int = 50) -> list[dict[str, Any]]:
-        result = await self._ckan(
-            "organization_list",
-            {"all_fields": True, "include_dataset_count": True, "include_extras": False},
-        )
-        if not isinstance(result, list):
-            return []
-        orgs = [self.format_organization(o, short=True) for o in result]
-        return orgs[: min(max(int(limit), 1), self.MAX_ORGS)]
+        limit = min(max(int(limit), 1), self.MAX_ORGS)
+        found = await self._list_paged("organization_list", limit)
+        return [self.format_organization(o, short=True) for o in found]
 
     async def get_organization(self, id: str) -> dict[str, Any]:
         result = await self._ckan(
@@ -552,13 +620,8 @@ class CkanAdapter:
         return out
 
     async def list_groups(self) -> list[dict[str, Any]]:
-        result = await self._ckan(
-            "group_list",
-            {"all_fields": True, "include_dataset_count": True, "include_extras": False},
-        )
-        if not isinstance(result, list):
-            return []
-        return [self.format_group(g) for g in result]
+        found = await self._list_paged("group_list", self.MAX_GROUPS)
+        return [self.format_group(g) for g in found]
 
     async def list_tags(self, query: str | None = None, limit: int = 20) -> list[str]:
         params: dict[str, Any] = {}

@@ -223,10 +223,13 @@ async def list_organizations(
     per-institution dataset counts."""
     adapter = adapters.get_adapter(country)
     orgs = await adapter.list_organizations(limit=limit)
+    total = await adapter.count_names("organization_list")
     return {
         "country": adapter.COUNTRY_CODE,
         "portal": adapter.PORTAL_NAME,
         "returned": len(orgs),
+        "total": total,
+        "complete": None if total is None else len(orgs) >= total,
         "organizations": orgs,
     }
 
@@ -248,10 +251,13 @@ async def list_groups(country: CountryArg) -> dict[str, Any]:
     """Thematic categories (economy, health, education, etc.) in a country's portal."""
     adapter = adapters.get_adapter(country)
     groups = await adapter.list_groups()
+    total = await adapter.count_names("group_list")
     return {
         "country": adapter.COUNTRY_CODE,
         "portal": adapter.PORTAL_NAME,
         "returned": len(groups),
+        "total": total,
+        "complete": None if total is None else len(groups) >= total,
         "groups": groups,
     }
 

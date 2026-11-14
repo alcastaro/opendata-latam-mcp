@@ -99,9 +99,9 @@ async def test_portal_failure_returns_a_dict_rather_than_raising(httpx_mock):
     assert "error" in out and "hint" in out
 
 
-async def test_network_error_returns_a_dict_rather_than_raising(httpx_mock):
+async def test_network_error_returns_a_dict_rather_than_raising(httpx_mock, sleeps):
     rid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    httpx_mock.add_exception(httpx.ConnectError("boom"))
+    httpx_mock.add_exception(httpx.ConnectError("boom"), is_reusable=True)
     out = await PanamaCkanAdapter().read_resource_rows(rid)
     assert "error" in out and "hint" in out
 
