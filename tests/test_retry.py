@@ -18,10 +18,12 @@ async def test_a_dropped_connection_is_retried(httpx_mock, sleeps):
     assert len(sleeps) == 1
 
 
-async def test_a_timeout_is_retried(httpx_mock, sleeps):
+async def test_a_timeout_is_not_retried(httpx_mock, sleeps):
     httpx_mock.add_exception(httpx.ReadTimeout("slow"), url=URL)
-    httpx_mock.add_response(url=URL, json=OK)
-    assert await PanamaCkanAdapter().list_tags() == ["salud"]
+    with pytest.raises(RuntimeError, match="timeout"):
+        await PanamaCkanAdapter().list_tags()
+    assert len(httpx_mock.get_requests()) == 1
+    assert sleeps == []
 
 
 @pytest.mark.parametrize("status", [429, 502, 503, 504])

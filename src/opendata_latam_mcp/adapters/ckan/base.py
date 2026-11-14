@@ -190,12 +190,16 @@ class CkanAdapter:
     async def _get_retrying(
         self, client: httpx.AsyncClient, path: str, params: dict[str, Any]
     ) -> httpx.Response:
-        """_get_capped, retried on transport failures and 429/502/503/504."""
+        """_get_capped, retried on dropped connections and 429/502/503/504."""
         for attempt in range(1, RETRY_ATTEMPTS + 1):
             delay = RETRY_BASE_DELAY * 2 ** (attempt - 1)
             try:
                 r = await self._get_capped(client, path, params)
-            except httpx.TransportError:  # includes timeouts and dropped connections
+            except httpx.TimeoutException:
+                # A portal that used the whole timeout rarely answers the next
+                # try, and three timeouts in a row would hold the caller ~45s.
+                raise
+            except httpx.TransportError:  # dropped and refused connections
                 if attempt == RETRY_ATTEMPTS:
                     raise
             else:
